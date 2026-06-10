@@ -1,0 +1,51 @@
+#+TITLE: org-skim
+
+Emacs package that integrates the [[https://skim-app.sourceforge.io/][Skim]] PDF reader with Org mode via
+AppleScript, letting you extract a PDF's table of contents as an Org
+heading tree to insert or yank.
+
+* Requirements
+
+- macOS with [[https://skim-app.sourceforge.io/][Skim]] installed (the package drives it through ~osascript~).
+- Emacs 26.1 or newer.
+
+* Installation
+
+** straight.el / use-package
+
+#+begin_src emacs-lisp
+(use-package org-skim
+  :straight (org-skim :type git :host github :repo "smartepsh/org-skim"))
+#+end_src
+
+** package-vc (built-in, Emacs 29+)
+
+#+begin_src emacs-lisp
+(package-vc-install "https://github.com/smartepsh/org-skim")
+#+end_src
+
+Or declaratively with ~use-package~ on Emacs 30+:
+
+#+begin_src emacs-lisp
+(use-package org-skim
+  :vc (:url "https://github.com/smartepsh/org-skim" :rev :newest))
+#+end_src
+
+* Usage
+
+Open a PDF in Skim, then in Emacs:
+
+- ~M-x org-skim-insert-toc~ — insert the front Skim document's table of
+  contents at point in the current buffer.
+- ~M-x org-skim-yank-toc~ — copy the table of contents to the kill ring
+  instead, so it can be pasted elsewhere.
+
+The outline is rendered as a tree of Org headings, one per line, with the
+depth indicated by repeating the header character.
+
+* Customization
+
+| Variable                 | Default | Description                                                                                                 |
+|--------------------------+---------+-------------------------------------------------------------------------------------------------------------|
+| ~org-skim-toc-header-char~ | ~?*~      | Character repeated to build each heading level's prefix.                                                    |
+| ~org-skim-toc-header-name~ | ~"TOC"~   | Root heading placed above the outline; items shift down one level below it. Set to ~nil~ for no root heading. |
