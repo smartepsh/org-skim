@@ -1,6 +1,6 @@
 #+TITLE: org-skim
 
-Emacs package that integrates the [[https://skim-app.sourceforge.io/][Skim]] PDF reader with Org mode via AppleScript.  Extract a PDF's table of contents as an Org heading tree to insert or yank, and drive Skim's page navigation from Emacs.
+Emacs package that integrates the [[https://skim-app.sourceforge.io/][Skim]] PDF reader with Org mode via AppleScript.  Extract a PDF's table of contents as an Org heading tree to insert or yank, drive Skim's page navigation from Emacs, and control its reading bar line by line.
 
 * Requirements
 
@@ -48,6 +48,31 @@ Drive Skim's page navigation without leaving Emacs:
 - ~M-x org-skim-previous-page~ — go back one page (no-op on the first page).
 - ~(org-skim-current-page)~ — non-interactive; returns the current page index (1-based integer) of the front Skim document.
 
+** Reading bar
+
+Control Skim's reading bar (the horizontal highlight band that tracks lines of text) from Emacs:
+
+- ~M-x org-skim-show-reading-bar~ — show the reading bar on the first line of the current page.  No-op if it is already visible.
+- ~M-x org-skim-hide-reading-bar~ — hide the reading bar.
+- ~M-x org-skim-toggle-reading-bar~ — flip between the two; when turning on, the bar lands on the first line of the current page.
+- ~M-x org-skim-reading-bar-next-line~ — advance the bar by one line.  At the bottom of a page it rolls to the next page; on the last page it stops on the final line.  If the bar is hidden, this shows it on the current page first.
+- ~M-x org-skim-reading-bar-previous-line~ — move the bar up by one line, with symmetric page rollover at the top of the page.
+
+* Debugging
+
+By default, AppleScript failures surface as the unhelpful message ~AppleScript error 1~ because Emacs' built-in ~do-applescript~ bridge collapses AppleScript's error strings before they reach Lisp.
+
+To see the real Skim error text, enable debug mode:
+
+- ~M-x org-skim-toggle-debug~ — flip the ~org-skim-debug~ flag.
+
+While debug mode is on:
+
+- the package forces the ~osascript~ subprocess backend (regardless of ~org-skim-applescript-backend~), because only that path lets AppleScript's error message reach Emacs;
+- any AppleScript failure is logged to the =*Messages*= buffer instead of being signalled, so the offending command quietly returns ~nil~ rather than tripping the debugger.
+
+Debug mode is off by default and intended only for development.
+
 * Customization
 
 | Variable                     | Default | Description                                                                                                           |
@@ -55,3 +80,4 @@ Drive Skim's page navigation without leaving Emacs:
 | ~org-skim-toc-header-char~   | ~?*~      | Character repeated to build each heading level's prefix.                                                              |
 | ~org-skim-toc-header-name~     | ~"TOC"~   | Root heading placed above the outline; items shift down one level below it. Set to ~nil~ for no root heading.           |
 | ~org-skim-applescript-backend~ | ~auto~    | How AppleScript is executed: ~auto~ (prefer built-in), ~do-applescript~ (built-in OSA bridge), or ~osascript~ (subprocess). |
+| ~org-skim-debug~               | ~nil~     | When non-nil, force the ~osascript~ backend and log AppleScript error text to =*Messages*=.  See the Debugging section.       |
