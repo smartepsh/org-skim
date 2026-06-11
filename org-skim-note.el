@@ -29,7 +29,6 @@
 
 (defconst org-skim--active-note-applescript
   "tell application \"Skim\"
-        if (count of documents) is 0 then error \"No document open in Skim.\"
         set d to front document
         set n to active note of d
         if n is missing value then return \"\"
@@ -53,6 +52,7 @@ The plist has the keys `:type', `:page', `:text', and `:bounds'.
 `:text' are strings.  `:bounds' is a list of four floats (left,
 top, right, bottom) or nil.  Returns nil when no note is selected
 in the front document."
+  (org-skim--ensure-document)
   (let ((raw (org-skim--run-applescript org-skim--active-note-applescript)))
     (when (and (stringp raw) (not (string-empty-p raw)))
       (let* ((parts (split-string raw org-skim--note-field-separator))
@@ -72,7 +72,6 @@ in the front document."
 
 (defconst org-skim--page1-notes-applescript
   "tell application \"Skim\"
-        if (count of documents) is 0 then error \"No document open in Skim.\"
         set d to front document
         set p to page 1 of d
         set noteList to every note of p
@@ -98,6 +97,7 @@ The key is captured in group 1.")
 Looks for the pattern \":SKIM:BIBTEX_KEY:KEY:\" in every note on
 page 1 of the front Skim document and returns KEY as a string.
 If no matching note is found, returns nil."
+  (org-skim--ensure-document)
   (let ((raw (org-skim--run-applescript org-skim--page1-notes-applescript)))
     (when (and (stringp raw) (not (string-empty-p raw)))
       (catch 'found
@@ -127,11 +127,11 @@ AppleScript string literal."
 If a BibTeX key note already exists on page 1 and its key matches
 KEY, do nothing.  If the key differs, update the note text in place.
 If no such note exists, create a new one with the key icon."
+  (org-skim--ensure-document)
   (let* ((escaped-key (org-skim--applescript-escape-string key))
          (icon-size (number-to-string org-skim-note-icon-size)))
     (org-skim--run-applescript
      (concat "tell application \"Skim\"
-        if (count of documents) is 0 then error \"No document open in Skim.\"
         set d to front document
         set p to page 1 of d
         set noteList to every note of p

@@ -131,14 +131,24 @@ non-nil, errors are logged to *Messages* instead of being signalled."
            (replace-regexp-in-string "\\\\" "\\\\\\\\" (or s "")))
           "\""))
 
+(defun org-skim--ensure-document ()
+  "Verify that Skim has at least one document open.
+Signal a `user-error' if Skim has no open document.  Call this at
+the top of any command that requires a front document."
+  (when (string= (org-skim--run-applescript
+                  "tell application \"Skim\"
+                    return ((count of documents) as string)
+                  end tell") "0")
+    (user-error "No document open in Skim")))
+
 (defun org-skim--front-document-info ()
   "Return an alist of facts about the front Skim document.
 Keys: `name' (display name), `path' (POSIX path), `page' (1-based page
 index as integer)."
+  (org-skim--ensure-document)
   (let* ((raw (org-skim--run-applescript
-               "tell application \"Skim\"
-        if (count of documents) is 0 then error \"No document open in Skim.\"
-        set d to front document
+                "tell application \"Skim\"
+         set d to front document
         set thePath to POSIX path of (file of d)
         set theName to name of d
         set thePage to index of current page of d

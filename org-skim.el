@@ -76,7 +76,6 @@ on run argv
 	set headerChar to item 1 of argv
 	set baseLevel to (item 2 of argv) as integer
 	tell application \"Skim\"
-		if (count of documents) is 0 then error \"No document open in Skim.\"
 		set theDoc to front document
 		set theOutlines to outlines of theDoc
 	end tell
@@ -95,6 +94,7 @@ When `org-skim-toc-header-name' is a non-empty string, a root heading
 \(e.g. \"* TOC\") is placed above the outline and every extracted item is
 shifted down one level beneath it.  The Skim link/target for each heading
 is not yet implemented and is therefore left blank."
+  (org-skim--ensure-document)
   (let* ((has-root (and (stringp org-skim-toc-header-name)
                         (not (string-empty-p org-skim-toc-header-name))))
          (base-level (if has-root 2 1))
@@ -111,10 +111,10 @@ is not yet implemented and is therefore left blank."
 
 (defun org-skim-current-page ()
   "Return the 1-based index of the current page in the front Skim document."
+  (org-skim--ensure-document)
   (string-to-number
    (org-skim--run-applescript
     "tell application \"Skim\"
-        if (count of documents) is 0 then error \"No document open in Skim.\"
         return (index of current page of front document) as string
 end tell")))
 
@@ -122,9 +122,9 @@ end tell")))
 (defun org-skim-next-page ()
   "Go to the next page in the front Skim document."
   (interactive)
+  (org-skim--ensure-document)
   (org-skim--run-applescript
    "tell application \"Skim\"
-        if (count of documents) is 0 then error \"No document open in Skim.\"
         tell front document
                 set n to (index of current page)
                 if n < (count of pages) then go it to page (n + 1) of it
@@ -135,9 +135,9 @@ end tell"))
 (defun org-skim-previous-page ()
   "Go to the previous page in the front Skim document."
   (interactive)
+  (org-skim--ensure-document)
   (org-skim--run-applescript
    "tell application \"Skim\"
-        if (count of documents) is 0 then error \"No document open in Skim.\"
         tell front document
                 set n to (index of current page)
                 if n > 1 then go it to page (n - 1) of it
@@ -150,6 +150,7 @@ end tell"))
   "Return an Org link for the current page of the front Skim document.
 The link target body is intentionally left blank; only the description
 is rendered, using `org-skim-page-link-format'."
+  (org-skim--ensure-document)
   (let* ((info (org-skim--front-document-info))
          (desc (org-skim--expand-template org-skim-page-link-format info)))
     (format "[[skim:][%s]]" desc)))
@@ -175,9 +176,9 @@ The link is placed on the kill ring."
   "Show the reading bar in the front Skim document on the current page.
 If the bar is already visible, this is a no-op."
   (interactive)
+  (org-skim--ensure-document)
   (org-skim--run-applescript
    "tell application \"Skim\"
-        if (count of documents) is 0 then error \"No document open in Skim.\"
         set d to front document
         set hasBar to has reading bar of d
         if hasBar is false then
@@ -190,9 +191,9 @@ end tell"))
 (defun org-skim-hide-reading-bar ()
   "Hide the reading bar in the front Skim document."
   (interactive)
+  (org-skim--ensure-document)
   (org-skim--run-applescript
    "tell application \"Skim\"
-        if (count of documents) is 0 then error \"No document open in Skim.\"
         set d to front document
         if has reading bar of d then set has reading bar of d to false
 end tell"))
@@ -202,9 +203,9 @@ end tell"))
   "Toggle the reading bar in the front Skim document.
 When turning the bar on, it lands on the first line of the current page."
   (interactive)
+  (org-skim--ensure-document)
   (org-skim--run-applescript
    "tell application \"Skim\"
-        if (count of documents) is 0 then error \"No document open in Skim.\"
         set d to front document
         if has reading bar of d then
                 set has reading bar of d to false
@@ -218,7 +219,6 @@ end tell"))
 on run argv
         set direction to item 1 of argv
         tell application \"Skim\"
-                if (count of documents) is 0 then error \"No document open in Skim.\"
                 set d to front document
                 set hasBar to has reading bar of d
                 if hasBar is false then
@@ -276,6 +276,7 @@ isn't visible, it is shown on the current page's first line.")
 At the bottom of a page the bar rolls to the next page; at the very
 last page it stays on the final line."
   (interactive)
+  (org-skim--ensure-document)
   (org-skim--run-applescript
    org-skim--reading-bar-move-applescript "down"))
 
@@ -285,6 +286,7 @@ last page it stays on the final line."
 At the top of a page the bar rolls to the previous page; at the very
 first page it stays on the first line."
   (interactive)
+  (org-skim--ensure-document)
   (org-skim--run-applescript
    org-skim--reading-bar-move-applescript "up"))
 
