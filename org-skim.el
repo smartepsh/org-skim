@@ -20,10 +20,7 @@
 
 ;;; Code:
 
-(defgroup org-skim nil
-  "Integrate the Skim PDF reader with Org mode."
-  :group 'org
-  :prefix "org-skim-")
+(require 'org-skim-helpers)
 
 (defcustom org-skim-toc-header-char ?*
   "Character used to build the prefix for each TOC heading level.
@@ -45,36 +42,11 @@ outline items start at the top level."
   :type '(choice (const :tag "No root heading" nil) string)
   :group 'org-skim)
 
-(defcustom org-skim-debug nil
-  "When non-nil, surface AppleScript error messages from Skim.
-Errors are otherwise swallowed with a terse \"AppleScript error 1\"
-because the `do-applescript' bridge collapses AppleScript's error
-strings at the C level before Emacs sees them, and that cannot be
-recovered with a `try'/`on error' wrapper.  Turning this on therefore
-forces the `osascript' subprocess backend (which writes the full error
-text to stderr) regardless of `org-skim-applescript-backend', and any
-error that occurs is logged to *Messages* instead of being signalled."
-  :type 'boolean
+(defcustom org-skim-page-link-format "${title} P${page}"
+  "Template used to render the description of an inserted page link.
+See `org-skim-bookmark-name-format' for the supported ${...} variables."
+  :type 'string
   :group 'org-skim)
-
-(defcustom org-skim-applescript-backend 'auto
-  "Backend used to execute AppleScript.
-`do-applescript' calls the built-in OSA bridge (faster, but only
-available when Emacs is built with macOS GUI support).  `osascript'
-shells out to the `osascript' binary (works in any macOS Emacs,
-including a terminal build).  `auto' picks `do-applescript' when
-available and falls back to `osascript' otherwise."
-  :type '(choice (const :tag "Auto-detect" auto)
-                 (const :tag "do-applescript (built-in)" do-applescript)
-                 (const :tag "osascript (subprocess)" osascript))
-  :group 'org-skim)
-
-;;;###autoload
-(defun org-skim-toggle-debug ()
-  "Toggle `org-skim-debug' and report the new state."
-  (interactive)
-  (setq org-skim-debug (not org-skim-debug))
-  (message "org-skim debug %s" (if org-skim-debug "enabled" "disabled")))
 
 ;;; AppleScript
 
@@ -116,71 +88,6 @@ end run
 It takes two arguments, the header character and the starting depth, and
 returns the outline as plain text with each item prefixed by the header
 character repeated according to its depth.")
-
-(defun org-skim--resolved-backend ()
-  "Return the concrete backend symbol implied by `org-skim-applescript-backend'.
-When `org-skim-debug' is non-nil, force the `osascript' backend so that
-AppleScript error messages reach Emacs; `do-applescript' collapses them
-to a bare \"AppleScript error 1\"."
-  (cond
-   (org-skim-debug 'osascript)
-   ((eq org-skim-applescript-backend 'auto)
-    (if (fboundp 'do-applescript) 'do-applescript 'osascript))
-   (t org-skim-applescript-backend)))
-
-(defun org-skim--applescript-argv-call (argv)
-  "Return the AppleScript expression `run {...}' that invokes `on run' with ARGV.
-ARGV is a list of strings; each is quoted and escaped for AppleScript."
-  (let ((quoted (mapconcat
-                 (lambda (s)
-                   (concat "\""
-                           (replace-regexp-in-string
-                            "\"" "\\\\\""
-                            (replace-regexp-in-string "\\\\" "\\\\\\\\" s))
-                           "\""))
-                 argv ", ")))
-    (concat "run {" quoted "}")))
-
-(defun org-skim--applescript-with-argv (script argv)
-  "Wrap SCRIPT so its `on run argv' handler sees ARGV under `do-applescript'.
-ARGV is a list of strings.  Strings are quoted and escaped for AppleScript."
-  (concat script "\nreturn " (org-skim--applescript-argv-call argv) "\n"))
-
-(defun org-skim--run-applescript (script &rest argv)
-  "Run AppleScript SCRIPT and return its trimmed output as a string.
-ARGV are passed as the `on run argv' arguments.  The backend is chosen
-according to `org-skim-applescript-backend'.  When `org-skim-debug' is
-non-nil, errors are logged to *Messages* instead of being signalled."
-  (condition-case err
-      (org-skim--applescript-dispatch script argv)
-    (error
-     (if org-skim-debug
-         (progn (message "%s" (error-message-string err)) nil)
-       (signal (car err) (cdr err))))))
-
-(defun org-skim--applescript-dispatch (script argv)
-  "Dispatch SCRIPT with ARGV to the resolved AppleScript backend."
-  (pcase (org-skim--resolved-backend)
-    ('do-applescript
-     (let* ((wrapped (if argv (org-skim--applescript-with-argv script argv) script))
-            (result (condition-case err
-                        (do-applescript wrapped)
-                      (error (error "org-skim: %s" (error-message-string err)))))
-            (text (cond ((stringp result) result)
-                        ((numberp result) (number-to-string result))
-                        (t (format "%s" result)))))
-       (string-trim text)))
-    ('osascript
-     (with-temp-buffer
-       (insert script)
-       (let ((status (apply #'call-process-region
-                            (point-min) (point-max)
-                            "osascript" t t nil
-                            "-" argv)))
-         (unless (eq status 0)
-           (error "org-skim: %s" (string-trim (buffer-string))))
-         (string-trim (buffer-string)))))
-    (other (error "org-skim: unknown applescript backend %S" other))))
 
 (defun org-skim--toc-string ()
   "Return the front Skim document's table of contents as Org heading text.
@@ -236,6 +143,30 @@ end tell"))
                 if n > 1 then go it to page (n - 1) of it
         end tell
 end tell"))
+
+;;; Page links
+
+(defun org-skim--page-link-string ()
+  "Return an Org link for the current page of the front Skim document.
+The link target body is intentionally left blank; only the description
+is rendered, using `org-skim-page-link-format'."
+  (let* ((info (org-skim--front-document-info))
+         (desc (org-skim--expand-template org-skim-page-link-format info)))
+    (format "[[skim:][%s]]" desc)))
+
+;;;###autoload
+(defun org-skim-insert-page-link ()
+  "Insert an Org link to the current page of the front Skim document at point."
+  (interactive)
+  (insert (org-skim--page-link-string)))
+
+;;;###autoload
+(defun org-skim-yank-page-link ()
+  "Copy an Org link to the current page of the front Skim document.
+The link is placed on the kill ring."
+  (interactive)
+  (kill-new (org-skim--page-link-string))
+  (message "org-skim: page link copied to kill ring"))
 
 ;;; Reading bar
 
@@ -380,6 +311,8 @@ buffer; it only yanks the TOC so it can be pasted elsewhere."
   (interactive)
   (kill-new (org-skim--toc-string))
   (message "org-skim: table of contents copied to kill ring"))
+
+(require 'org-skim-bookmarks)
 
 (provide 'org-skim)
 

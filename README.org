@@ -1,6 +1,6 @@
 #+TITLE: org-skim
 
-Emacs package that integrates the [[https://skim-app.sourceforge.io/][Skim]] PDF reader with Org mode via AppleScript.  Extract a PDF's table of contents as an Org heading tree to insert or yank, drive Skim's page navigation from Emacs, and control its reading bar line by line.
+Emacs package that integrates the [[https://skim-app.sourceforge.io/][Skim]] PDF reader with Org mode via AppleScript.  Extract a PDF's table of contents as an Org heading tree to insert or yank, drive Skim's page navigation from Emacs, manage Skim bookmarks (including folder bookmarks), and control its reading bar line by line.
 
 * Requirements
 
@@ -48,6 +48,22 @@ Drive Skim's page navigation without leaving Emacs:
 - ~M-x org-skim-previous-page~ — go back one page (no-op on the first page).
 - ~(org-skim-current-page)~ — non-interactive; returns the current page index (1-based integer) of the front Skim document.
 
+** Page links
+
+Capture an Org link to the current page of the front Skim document.  The description follows ~org-skim-page-link-format~ (default ~"${title} P${page}"~); the link target is intentionally left blank for now.
+
+- ~M-x org-skim-insert-page-link~ — insert the link at point.
+- ~M-x org-skim-yank-page-link~ — copy the link to the kill ring.
+
+** Bookmarks
+
+Manage Skim's bookmark list — both top-level (“global”) bookmarks and bookmarks nested inside folder bookmarks — without leaving Emacs:
+
+- ~M-x org-skim-bookmark-add~ — add a bookmark at the current page of the front Skim document.  The name defaults silently to ~org-skim-bookmark-name-format~; with a prefix argument (or when ~org-skim-bookmark-prompt-name~ is non-nil) you are prompted with a name prefilled from ~org-skim-bookmark-prompt-format~.  The container is chosen per ~org-skim-bookmark-container~: ~auto~ prompts every time over =[Global]=, every existing folder bookmark, and =[New folder...]=; ~nil~ adds at the top level silently; a string names a folder (created on confirmation if it doesn't exist).
+- ~M-x org-skim-bookmark-remove~ — remove a bookmark chosen via completion.
+- ~M-x org-skim-goto-bookmark~ — open a bookmark's PDF in Skim (if not already open), bring its window to the front, and jump to the bookmarked page.
+- ~(org-skim-bookmark-list)~ — non-interactive; returns every file bookmark as ~((folder name path page occurrence) ...)~, with globals first, then by folder path, then by file basename, then by bookmark name.
+
 ** Reading bar
 
 Control Skim's reading bar (the horizontal highlight band that tracks lines of text) from Emacs:
@@ -75,9 +91,16 @@ Debug mode is off by default and intended only for development.
 
 * Customization
 
-| Variable                     | Default | Description                                                                                                           |
-|------------------------------+---------+-----------------------------------------------------------------------------------------------------------------------|
-| ~org-skim-toc-header-char~   | ~?*~      | Character repeated to build each heading level's prefix.                                                              |
-| ~org-skim-toc-header-name~     | ~"TOC"~   | Root heading placed above the outline; items shift down one level below it. Set to ~nil~ for no root heading.           |
-| ~org-skim-applescript-backend~ | ~auto~    | How AppleScript is executed: ~auto~ (prefer built-in), ~do-applescript~ (built-in OSA bridge), or ~osascript~ (subprocess). |
-| ~org-skim-debug~               | ~nil~     | When non-nil, force the ~osascript~ backend and log AppleScript error text to =*Messages*=.  See the Debugging section.       |
+| Variable                          | Default              | Description                                                                                                                |
+|-----------------------------------+----------------------+----------------------------------------------------------------------------------------------------------------------------|
+| ~org-skim-toc-header-char~        | ~?*~                 | Character repeated to build each heading level's prefix.                                                                   |
+| ~org-skim-toc-header-name~        | ~"TOC"~              | Root heading placed above the outline; items shift down one level below it. Set to ~nil~ for no root heading.              |
+| ~org-skim-page-link-format~       | ~"${title} P${page}"~ | Template used to render the description of an inserted page link.                                                          |
+| ~org-skim-bookmark-name-format~   | ~"P${page}"~         | Template for the silent default name when adding a bookmark.                                                               |
+| ~org-skim-bookmark-prompt-format~ | ~"${title} P${page}"~ | Template used to prefill the prompt when ~org-skim-bookmark-add~ asks for a name.                                          |
+| ~org-skim-bookmark-prompt-name~   | ~nil~                | When non-nil, always prompt for the bookmark name on add.  A prefix argument to ~org-skim-bookmark-add~ flips this per call. |
+| ~org-skim-bookmark-container~     | ~auto~               | Where ~org-skim-bookmark-add~ places new bookmarks: ~auto~ prompts, ~nil~ adds at top level, or a folder name string.       |
+| ~org-skim-applescript-backend~    | ~auto~               | How AppleScript is executed: ~auto~ (prefer built-in), ~do-applescript~ (built-in OSA bridge), or ~osascript~ (subprocess). |
+| ~org-skim-debug~                  | ~nil~                | When non-nil, force the ~osascript~ backend and log AppleScript error text to =*Messages*=.  See the Debugging section.    |
+
+Template variables supported in ~org-skim-page-link-format~, ~org-skim-bookmark-name-format~, and ~org-skim-bookmark-prompt-format~: ~${title}~, ~${file}~, ~${path}~, ~${page}~, ~${date}~, ~${time}~.  Unknown variables are left in place.
