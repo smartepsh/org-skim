@@ -237,6 +237,126 @@ end tell"))
         end tell
 end tell"))
 
+;;; Reading bar
+
+;;;###autoload
+(defun org-skim-show-reading-bar ()
+  "Show the reading bar in the front Skim document on the current page.
+If the bar is already visible, this is a no-op."
+  (interactive)
+  (org-skim--run-applescript
+   "tell application \"Skim\"
+        if (count of documents) is 0 then error \"No document open in Skim.\"
+        set d to front document
+        set hasBar to has reading bar of d
+        if hasBar is false then
+                set has reading bar of d to true
+                go (reading bar of d) to (line 1 of current page of d)
+        end if
+end tell"))
+
+;;;###autoload
+(defun org-skim-hide-reading-bar ()
+  "Hide the reading bar in the front Skim document."
+  (interactive)
+  (org-skim--run-applescript
+   "tell application \"Skim\"
+        if (count of documents) is 0 then error \"No document open in Skim.\"
+        set d to front document
+        if has reading bar of d then set has reading bar of d to false
+end tell"))
+
+;;;###autoload
+(defun org-skim-toggle-reading-bar ()
+  "Toggle the reading bar in the front Skim document.
+When turning the bar on, it lands on the first line of the current page."
+  (interactive)
+  (org-skim--run-applescript
+   "tell application \"Skim\"
+        if (count of documents) is 0 then error \"No document open in Skim.\"
+        set d to front document
+        if has reading bar of d then
+                set has reading bar of d to false
+        else
+                set has reading bar of d to true
+                go (reading bar of d) to (line 1 of current page of d)
+        end if
+end tell"))
+
+(defconst org-skim--reading-bar-move-applescript "\
+on run argv
+        set direction to item 1 of argv
+        tell application \"Skim\"
+                if (count of documents) is 0 then error \"No document open in Skim.\"
+                set d to front document
+                set hasBar to has reading bar of d
+                if hasBar is false then
+                        set has reading bar of d to true
+                        go (reading bar of d) to (line 1 of current page of d)
+                        return
+                end if
+                set rb to reading bar of d
+                set lineStep to (width of rb)
+                if lineStep < 1 then set lineStep to 1
+                set barPage to page of rb
+                set barPageIdx to index of barPage
+                set barLines to lines of rb
+                set firstIdx to index of (item 1 of barLines)
+                set lastIdx to index of (item -1 of barLines)
+                set linesOnPage to count of (lines of barPage)
+                if direction is \"down\" then
+                        set targetIdx to lastIdx + 1
+                        if targetIdx > linesOnPage then
+                                try
+                                        set np to page (barPageIdx + 1) of d
+                                        go rb to (line 1 of np)
+                                on error
+                                        go rb to (line linesOnPage of barPage)
+                                end try
+                        else
+                                go rb to (line targetIdx of barPage)
+                        end if
+                else
+                        set targetIdx to firstIdx - lineStep
+                        if targetIdx < 1 then
+                                try
+                                        set pp to page (barPageIdx - 1) of d
+                                        set lastOnPrev to count of (lines of pp)
+                                        set toIdx to lastOnPrev - lineStep + 1
+                                        if toIdx < 1 then set toIdx to 1
+                                        go rb to (line toIdx of pp)
+                                on error
+                                        go rb to (line 1 of barPage)
+                                end try
+                        else
+                                go rb to (line targetIdx of barPage)
+                        end if
+                end if
+        end tell
+end run
+"
+  "AppleScript that advances the front document's reading bar.
+Argument: \"down\" or \"up\".  Rolls across page boundaries; if the bar
+isn't visible, it is shown on the current page's first line.")
+
+;;;###autoload
+(defun org-skim-reading-bar-next-line ()
+  "Move the reading bar down one line in the front Skim document.
+At the bottom of a page the bar rolls to the next page; at the very
+last page it stays on the final line."
+  (interactive)
+  (org-skim--run-applescript
+   org-skim--reading-bar-move-applescript "down"))
+
+;;;###autoload
+(defun org-skim-reading-bar-previous-line ()
+  "Move the reading bar up one line in the front Skim document.
+At the top of a page the bar rolls to the previous page; at the very
+first page it stays on the first line."
+  (interactive)
+  (org-skim--run-applescript
+   org-skim--reading-bar-move-applescript "up"))
+
 ;;; Commands
 
 ;;;###autoload
