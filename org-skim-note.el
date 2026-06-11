@@ -27,6 +27,10 @@
 (defconst org-skim--note-field-separator "\x1f"
   "Delimiter used between fields in the active-note AppleScript reply.")
 
+(defconst org-skim--org-id-regexp ":SKIM:ORG_ID:\\([^:]+\\):"
+  "Regexp matching a Skim-embedded Org ID in note text.
+The ID is captured in group 1.")
+
 (defconst org-skim--active-note-applescript
   "tell application \"Skim\"
         set d to front document
@@ -58,7 +62,9 @@ in the front document."
       (let* ((parts (split-string raw org-skim--note-field-separator))
              (type (nth 0 parts))
              (page-str (nth 1 parts))
-             (text (nth 2 parts))
+             (text (replace-regexp-in-string
+                    org-skim--org-id-regexp ""
+                    (nth 2 parts)))
              (bounds-str (nth 3 parts)))
         (list :type type
               :page (and page-str
@@ -104,10 +110,6 @@ If no matching note is found, returns nil."
         (dolist (text (split-string raw "\x1e" t))
           (when (string-match org-skim--bibtex-key-regexp text)
             (throw 'found (match-string 1 text))))))))
-
-(defconst org-skim--org-id-regexp ":SKIM:ORG_ID:\\([^:]+\\):"
-  "Regexp matching a Skim-embedded Org ID in note text.
-The ID is captured in group 1.")
 
 ;;;###autoload
 (defun org-skim-get-org-id ()
