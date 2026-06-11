@@ -45,6 +45,18 @@ outline items start at the top level."
   :type '(choice (const :tag "No root heading" nil) string)
   :group 'org-skim)
 
+(defcustom org-skim-debug nil
+  "When non-nil, surface AppleScript error messages from Skim.
+Errors are otherwise swallowed with a terse \"AppleScript error 1\"
+because the `do-applescript' bridge collapses AppleScript's error
+strings at the C level before Emacs sees them, and that cannot be
+recovered with a `try'/`on error' wrapper.  Turning this on therefore
+forces the `osascript' subprocess backend (which writes the full error
+text to stderr) regardless of `org-skim-applescript-backend', and any
+error that occurs is logged to *Messages* instead of being signalled."
+  :type 'boolean
+  :group 'org-skim)
+
 (defcustom org-skim-applescript-backend 'auto
   "Backend used to execute AppleScript.
 `do-applescript' calls the built-in OSA bridge (faster, but only
@@ -56,6 +68,13 @@ available and falls back to `osascript' otherwise."
                  (const :tag "do-applescript (built-in)" do-applescript)
                  (const :tag "osascript (subprocess)" osascript))
   :group 'org-skim)
+
+;;;###autoload
+(defun org-skim-toggle-debug ()
+  "Toggle `org-skim-debug' and report the new state."
+  (interactive)
+  (setq org-skim-debug (not org-skim-debug))
+  (message "org-skim debug %s" (if org-skim-debug "enabled" "disabled")))
 
 ;;; AppleScript
 
@@ -99,14 +118,19 @@ returns the outline as plain text with each item prefixed by the header
 character repeated according to its depth.")
 
 (defun org-skim--resolved-backend ()
-  "Return the concrete backend symbol implied by `org-skim-applescript-backend'."
-  (pcase org-skim-applescript-backend
-    ('auto (if (fboundp 'do-applescript) 'do-applescript 'osascript))
-    (sym sym)))
+  "Return the concrete backend symbol implied by `org-skim-applescript-backend'.
+When `org-skim-debug' is non-nil, force the `osascript' backend so that
+AppleScript error messages reach Emacs; `do-applescript' collapses them
+to a bare \"AppleScript error 1\"."
+  (cond
+   (org-skim-debug 'osascript)
+   ((eq org-skim-applescript-backend 'auto)
+    (if (fboundp 'do-applescript) 'do-applescript 'osascript))
+   (t org-skim-applescript-backend)))
 
-(defun org-skim--applescript-with-argv (script argv)
-  "Wrap SCRIPT so its `on run argv' handler sees ARGV under `do-applescript'.
-ARGV is a list of strings.  Strings are quoted and escaped for AppleScript."
+(defun org-skim--applescript-argv-call (argv)
+  "Return the AppleScript expression `run {...}' that invokes `on run' with ARGV.
+ARGV is a list of strings; each is quoted and escaped for AppleScript."
   (let ((quoted (mapconcat
                  (lambda (s)
                    (concat "\""
@@ -115,12 +139,27 @@ ARGV is a list of strings.  Strings are quoted and escaped for AppleScript."
                             (replace-regexp-in-string "\\\\" "\\\\\\\\" s))
                            "\""))
                  argv ", ")))
-    (concat script "\nreturn run {" quoted "}\n")))
+    (concat "run {" quoted "}")))
+
+(defun org-skim--applescript-with-argv (script argv)
+  "Wrap SCRIPT so its `on run argv' handler sees ARGV under `do-applescript'.
+ARGV is a list of strings.  Strings are quoted and escaped for AppleScript."
+  (concat script "\nreturn " (org-skim--applescript-argv-call argv) "\n"))
 
 (defun org-skim--run-applescript (script &rest argv)
   "Run AppleScript SCRIPT and return its trimmed output as a string.
 ARGV are passed as the `on run argv' arguments.  The backend is chosen
-according to `org-skim-applescript-backend'."
+according to `org-skim-applescript-backend'.  When `org-skim-debug' is
+non-nil, errors are logged to *Messages* instead of being signalled."
+  (condition-case err
+      (org-skim--applescript-dispatch script argv)
+    (error
+     (if org-skim-debug
+         (progn (message "%s" (error-message-string err)) nil)
+       (signal (car err) (cdr err))))))
+
+(defun org-skim--applescript-dispatch (script argv)
+  "Dispatch SCRIPT with ARGV to the resolved AppleScript backend."
   (pcase (org-skim--resolved-backend)
     ('do-applescript
      (let* ((wrapped (if argv (org-skim--applescript-with-argv script argv) script))
