@@ -1,6 +1,6 @@
 #+TITLE: org-skim
 
-Emacs package that integrates the [[https://skim-app.sourceforge.io/][Skim]] PDF reader with Org mode via AppleScript.  Extract a PDF's table of contents as an Org heading tree to insert or yank, drive Skim's page navigation from Emacs, manage Skim bookmarks (including folder bookmarks), and control its reading bar line by line.
+Emacs package that integrates the [[https://skim-app.sourceforge.io/][Skim]] PDF reader with Org mode via AppleScript.  Extract a PDF's table of contents as an Org heading tree to insert or yank, drive Skim's page navigation from Emacs, manage Skim bookmarks (including folder bookmarks), control its reading bar line by line, and link Skim annotations to Org headings you can jump between in either direction.
 
 * Requirements
 
@@ -64,6 +64,26 @@ Manage Skim's bookmark list — both top-level (“global”) bookmarks and book
 - ~M-x org-skim-goto-bookmark~ — open a bookmark's PDF in Skim (if not already open), bring its window to the front, and jump to the bookmarked page.
 - ~(org-skim-bookmark-list)~ — non-interactive; returns every file bookmark as ~((folder name path page occurrence) ...)~, with globals first, then by folder path, then by file basename, then by bookmark name.
 
+** Notes
+
+Link Skim annotations to Org headings and move between the two.  A captured note shares an Org ID, embedded in the Skim note as a hidden ~:SKIM:ORG_ID:<id>:~ marker line and stored as the heading's ~ID~ property; the heading also records the page in ~SKIM_PAGE~ and the document's BibTeX key in a file-level ~REFERENCES~ property (~@citekey~).  The BibTeX key itself is read from a key-icon note on page 1 of the PDF (~:SKIM:BIBTEX_KEY:<key>:~).
+
+This workflow requires ~org-id~, ~org-capture~, and [[https://github.com/emacs-citar/citar][citar]] (for resolving citekeys to files and bibliography fields).  Load it with ~(require 'org-skim-note)~; it is not pulled in by ~(require 'org-skim)~ so the core commands stay free of these dependencies.
+
+From a selected note in Skim:
+
+- ~M-x org-skim-capture-note~ — start an ~org-capture~ for the selected Skim note.  Generates (or reuses) a shared Org ID, prepends the marker line to the note, and captures into the notes file for the document's citekey, following ~org-skim-capture-template~.  A new notes file gets a frontmatter built from ~org-skim-note-title-template~, ~org-skim-note-filetags~, and ~org-skim-note-references-property~.
+- ~M-x org-skim-open-org-note~ — jump to the Org heading linked to the selected Skim note (via ~org-skim-open-org-note-function~, default ~org-id-find~).
+- ~M-x org-skim-read-org-note~ — return the linked heading's body (heading and drawers stripped) as a string, without displaying a buffer.
+- ~M-x org-skim-note-dwim~ — if the selected note already links to an existing Org entry, read it (as ~org-skim-read-org-note~); otherwise capture one (as ~org-skim-capture-note~).  Intended as the single key binding for the workflow.
+- ~M-x org-skim-set-bibtex-key~ — set (or update) the page-1 key-icon note that records the document's BibTeX key.
+
+From an Org heading in Emacs:
+
+- ~M-x org-skim-open-note-in-skim~ — the inverse direction.  When point is on a heading carrying ~SKIM_PAGE~ and ~ID~ and inheriting a ~REFERENCES~ citekey, resolve the citekey to a file via citar (first one whose extension is in ~org-skim-open-note-extensions~, default ~pdf~), open it in Skim, jump to ~SKIM_PAGE~, and select the note bearing the heading's Org ID.  Focus stays on Emacs.  If the heading is not a Skim note, it just prints a message.
+
+Non-interactive helpers: ~(org-skim-get-active-note)~ returns a plist (~:type :page :text :org-id :bounds~) for the selected note; ~(org-skim-bibtex-key)~ returns the page-1 BibTeX key; ~(org-skim-get-org-id)~ returns the selected note's embedded Org ID.
+
 ** Reading bar
 
 Control Skim's reading bar (the horizontal highlight band that tracks lines of text) from Emacs:
@@ -91,16 +111,24 @@ Debug mode is off by default and intended only for development.
 
 * Customization
 
-| Variable                          | Default              | Description                                                                                                                |
-|-----------------------------------+----------------------+----------------------------------------------------------------------------------------------------------------------------|
-| ~org-skim-toc-header-char~        | ~?*~                 | Character repeated to build each heading level's prefix.                                                                   |
-| ~org-skim-toc-header-name~        | ~"TOC"~              | Root heading placed above the outline; items shift down one level below it. Set to ~nil~ for no root heading.              |
-| ~org-skim-page-link-format~       | ~"${title} P${page}"~ | Template used to render the description of an inserted page link.                                                          |
-| ~org-skim-bookmark-name-format~   | ~"P${page}"~         | Template for the silent default name when adding a bookmark.                                                               |
-| ~org-skim-bookmark-prompt-format~ | ~"${title} P${page}"~ | Template used to prefill the prompt when ~org-skim-bookmark-add~ asks for a name.                                          |
-| ~org-skim-bookmark-prompt-name~   | ~nil~                | When non-nil, always prompt for the bookmark name on add.  A prefix argument to ~org-skim-bookmark-add~ flips this per call. |
-| ~org-skim-bookmark-container~     | ~auto~               | Where ~org-skim-bookmark-add~ places new bookmarks: ~auto~ prompts, ~nil~ adds at top level, or a folder name string.       |
-| ~org-skim-applescript-backend~    | ~auto~               | How AppleScript is executed: ~auto~ (prefer built-in), ~do-applescript~ (built-in OSA bridge), or ~osascript~ (subprocess). |
-| ~org-skim-debug~                  | ~nil~                | When non-nil, force the ~osascript~ backend and log AppleScript error text to =*Messages*=.  See the Debugging section.    |
+| Variable                            | Default                       | Description                                                                                                                  |
+|-------------------------------------+-------------------------------+------------------------------------------------------------------------------------------------------------------------------|
+| ~org-skim-toc-header-char~          | ~?*~                          | Character repeated to build each heading level's prefix.                                                                     |
+| ~org-skim-toc-header-name~          | ~"TOC"~                       | Root heading placed above the outline; items shift down one level below it. Set to ~nil~ for no root heading.                |
+| ~org-skim-page-link-format~         | ~"${title} P${page}"~         | Template used to render the description of an inserted page link.                                                            |
+| ~org-skim-bookmark-name-format~     | ~"P${page}"~                  | Template for the silent default name when adding a bookmark.                                                                 |
+| ~org-skim-bookmark-prompt-format~   | ~"${title} P${page}"~         | Template used to prefill the prompt when ~org-skim-bookmark-add~ asks for a name.                                            |
+| ~org-skim-bookmark-prompt-name~     | ~nil~                         | When non-nil, always prompt for the bookmark name on add.  A prefix argument to ~org-skim-bookmark-add~ flips this per call. |
+| ~org-skim-bookmark-container~       | ~auto~                        | Where ~org-skim-bookmark-add~ places new bookmarks: ~auto~ prompts, ~nil~ adds at top level, or a folder name string.        |
+| ~org-skim-open-org-note-function~   | ~org-id-find~                 | Function called with the Org ID to open a note from a Skim annotation.                                                       |
+| ~org-skim-open-note-extensions~     | ~("pdf")~                     | File extensions ~org-skim-open-note-in-skim~ will open in Skim (lowercase, no leading dot).                                  |
+| ~org-skim-note-file-function~       | ~org-skim--citar-note-file~   | Function mapping a citekey to its Org notes file (default resolves through citar's file-per-key layout).                     |
+| ~org-skim-capture-template~         | (see docstring)               | ~org-capture~ template used by ~org-skim-capture-note~; splice note fields with ~%(org-skim-capture-value KEY)~.             |
+| ~org-skim-note-title-template~      | ~"Notes on ${title}/${year}"~ | Template for the ~#+title~ of a newly created notes file (citar fields ~title~, ~author~, ~year~, ~citekey~).                |
+| ~org-skim-note-filetags~            | ~"ReadingNote"~               | Tag(s) for the ~#+filetags~ of a new notes file; ~nil~ omits the line.                                                       |
+| ~org-skim-note-references-property~ | ~"REFERENCES"~                | File-level property naming the ~@citekey~ reference in new notes files; ~nil~ omits it.                                      |
+| ~org-skim-note-icon-size~           | ~16~                          | Size in points of the page-1 key-icon note created by ~org-skim-set-bibtex-key~.                                             |
+| ~org-skim-applescript-backend~      | ~auto~                        | How AppleScript is executed: ~auto~ (prefer built-in), ~do-applescript~ (built-in OSA bridge), or ~osascript~ (subprocess).  |
+| ~org-skim-debug~                    | ~nil~                         | When non-nil, force the ~osascript~ backend and log AppleScript error text to =*Messages*=.  See the Debugging section.      |
 
 Template variables supported in ~org-skim-page-link-format~, ~org-skim-bookmark-name-format~, and ~org-skim-bookmark-prompt-format~: ~${title}~, ~${file}~, ~${path}~, ~${page}~, ~${date}~, ~${time}~.  Unknown variables are left in place.
