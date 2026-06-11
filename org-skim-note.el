@@ -35,6 +35,9 @@
 (declare-function org-capture-target-buffer "org-capture" (file))
 (declare-function org-id-new "org-id" (&optional prefix))
 (declare-function org-id-add-location "org-id" (id file))
+(declare-function org-id-find "org-id" (id &optional markerp))
+(declare-function org-end-of-subtree "org" (&optional invisible-ok to-heading))
+(declare-function org-end-of-meta-data "org" (&optional full))
 (declare-function citar-get-value "citar" (field key-or-entry))
 
 (defvar org-note-abort)
@@ -165,6 +168,38 @@ the pattern \":SKIM:ORG_ID:ID:\" in the active note.  Signals a
   (interactive)
   (let ((id (org-skim-get-org-id)))
     (funcall org-skim-open-org-note-function id)))
+
+(defun org-skim--org-note-content (id)
+  "Return the body of the Org entry with ID as a string, or nil.
+Returns nil when ID does not resolve to an existing Org entry.
+The heading line, planning lines, and drawers (PROPERTIES included)
+are stripped; only the entry's content up to the end of its subtree
+is returned, trimmed of surrounding whitespace."
+  (require 'org-id)
+  (let ((location (org-id-find id)))
+    (when location
+      (with-current-buffer (find-file-noselect (car location))
+        (save-restriction
+          (widen)
+          (save-excursion
+            (goto-char (cdr location))
+            (let ((end (save-excursion (org-end-of-subtree t t) (point))))
+              (org-end-of-meta-data t)
+              (string-trim
+               (buffer-substring-no-properties (min (point) end) end)))))))))
+
+;;;###autoload
+(defun org-skim-read-org-note ()
+  "Return the content of the Org note linked to the active Skim note.
+The note's embedded Org ID (\":SKIM:ORG_ID:ID:\") is resolved with
+`org-id-find' and the entry's body (heading and drawers stripped,
+see `org-skim--org-note-content') is returned as a string; no
+buffer is displayed.  Signals a `user-error' if no note is
+selected, no Org ID is embedded, or the ID does not resolve."
+  (interactive)
+  (let ((id (org-skim-get-org-id)))
+    (or (org-skim--org-note-content id)
+        (user-error "Org ID %s does not resolve to an Org note" id))))
 
 (defcustom org-skim-note-icon-size 16
   "Size in points of the anchored note icon for BibTeX keys.
@@ -417,6 +452,24 @@ On finalize, the ID is registered with `org-id-add-location' so
       ((error quit)
        (setq org-skim--pending-capture nil)
        (signal (car err) (cdr err))))))
+
+;;;###autoload
+(defun org-skim-note-dwim ()
+  "Capture or read the Org note for the active note in Skim.
+
+If the active note has no embedded \":SKIM:ORG_ID:...:\" marker, or
+the embedded ID does not resolve to an existing Org entry, start
+`org-skim-capture-note' (which reuses an already embedded ID).
+Otherwise return the linked entry's content as a string, as with
+`org-skim-read-org-note'; no buffer is displayed.  Intended as the
+single key binding for the Skim note workflow."
+  (interactive)
+  (require 'org-id)
+  (let* ((note (or (org-skim-get-active-note)
+                   (user-error "No note selected in Skim")))
+         (id (plist-get note :org-id))
+         (content (and id (org-skim--org-note-content id))))
+    (or content (org-skim-capture-note))))
 
 (provide 'org-skim-note)
 
