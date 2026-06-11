@@ -1,13 +1,11 @@
 #+TITLE: org-skim
 
-Emacs package that integrates the [[https://skim-app.sourceforge.io/][Skim]] PDF reader with Org mode via
-AppleScript, letting you extract a PDF's table of contents as an Org
-heading tree to insert or yank.
+Emacs package that integrates the [[https://skim-app.sourceforge.io/][Skim]] PDF reader with Org mode via AppleScript.  Extract a PDF's table of contents as an Org heading tree to insert or yank, and drive Skim's page navigation from Emacs.
 
 * Requirements
 
-- macOS with [[https://skim-app.sourceforge.io/][Skim]] installed (the package drives it through ~osascript~).
-- Emacs 26.1 or newer.
+- macOS with [[https://skim-app.sourceforge.io/][Skim]] installed (the package drives it via AppleScript).
+- Emacs 26.1 or newer.  A GUI build (with ~do-applescript~) is used automatically when available; a terminal build falls back to shelling out to ~osascript~.
 
 * Installation
 
@@ -35,17 +33,25 @@ Or declaratively with ~use-package~ on Emacs 30+:
 
 Open a PDF in Skim, then in Emacs:
 
-- ~M-x org-skim-insert-toc~ — insert the front Skim document's table of
-  contents at point in the current buffer.
-- ~M-x org-skim-yank-toc~ — copy the table of contents to the kill ring
-  instead, so it can be pasted elsewhere.
+** Table of contents
 
-The outline is rendered as a tree of Org headings, one per line, with the
-depth indicated by repeating the header character.
+- ~M-x org-skim-insert-toc~ — insert the front Skim document's table of contents at point in the current buffer.
+- ~M-x org-skim-yank-toc~ — copy the table of contents to the kill ring instead, so it can be pasted elsewhere.
+
+The outline is rendered as a tree of Org headings, one per line, with the depth indicated by repeating the header character.
+
+** Page navigation
+
+Drive Skim's page navigation without leaving Emacs:
+
+- ~M-x org-skim-next-page~ — advance the front Skim document by one page (no-op on the last page).
+- ~M-x org-skim-previous-page~ — go back one page (no-op on the first page).
+- ~(org-skim-current-page)~ — non-interactive; returns the current page index (1-based integer) of the front Skim document.
 
 * Customization
 
-| Variable                 | Default | Description                                                                                                 |
-|--------------------------+---------+-------------------------------------------------------------------------------------------------------------|
-| ~org-skim-toc-header-char~ | ~?*~      | Character repeated to build each heading level's prefix.                                                    |
-| ~org-skim-toc-header-name~ | ~"TOC"~   | Root heading placed above the outline; items shift down one level below it. Set to ~nil~ for no root heading. |
+| Variable                     | Default | Description                                                                                                           |
+|------------------------------+---------+-----------------------------------------------------------------------------------------------------------------------|
+| ~org-skim-toc-header-char~   | ~?*~      | Character repeated to build each heading level's prefix.                                                              |
+| ~org-skim-toc-header-name~     | ~"TOC"~   | Root heading placed above the outline; items shift down one level below it. Set to ~nil~ for no root heading.           |
+| ~org-skim-applescript-backend~ | ~auto~    | How AppleScript is executed: ~auto~ (prefer built-in), ~do-applescript~ (built-in OSA bridge), or ~osascript~ (subprocess). |

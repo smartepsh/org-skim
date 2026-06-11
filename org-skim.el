@@ -45,6 +45,18 @@ outline items start at the top level."
   :type '(choice (const :tag "No root heading" nil) string)
   :group 'org-skim)
 
+(defcustom org-skim-applescript-backend 'auto
+  "Backend used to execute AppleScript.
+`do-applescript' calls the built-in OSA bridge (faster, but only
+available when Emacs is built with macOS GUI support).  `osascript'
+shells out to the `osascript' binary (works in any macOS Emacs,
+including a terminal build).  `auto' picks `do-applescript' when
+available and falls back to `osascript' otherwise."
+  :type '(choice (const :tag "Auto-detect" auto)
+                 (const :tag "do-applescript (built-in)" do-applescript)
+                 (const :tag "osascript (subprocess)" osascript))
+  :group 'org-skim)
+
 ;;; AppleScript
 
 (defconst org-skim--toc-applescript "\
@@ -86,33 +98,105 @@ It takes two arguments, the header character and the starting depth, and
 returns the outline as plain text with each item prefixed by the header
 character repeated according to its depth.")
 
+(defun org-skim--resolved-backend ()
+  "Return the concrete backend symbol implied by `org-skim-applescript-backend'."
+  (pcase org-skim-applescript-backend
+    ('auto (if (fboundp 'do-applescript) 'do-applescript 'osascript))
+    (sym sym)))
+
+(defun org-skim--applescript-with-argv (script argv)
+  "Wrap SCRIPT so its `on run argv' handler sees ARGV under `do-applescript'.
+ARGV is a list of strings.  Strings are quoted and escaped for AppleScript."
+  (let ((quoted (mapconcat
+                 (lambda (s)
+                   (concat "\""
+                           (replace-regexp-in-string
+                            "\"" "\\\\\""
+                            (replace-regexp-in-string "\\\\" "\\\\\\\\" s))
+                           "\""))
+                 argv ", ")))
+    (concat script "\nreturn run {" quoted "}\n")))
+
+(defun org-skim--run-applescript (script &rest argv)
+  "Run AppleScript SCRIPT and return its trimmed output as a string.
+ARGV are passed as the `on run argv' arguments.  The backend is chosen
+according to `org-skim-applescript-backend'."
+  (pcase (org-skim--resolved-backend)
+    ('do-applescript
+     (let* ((wrapped (if argv (org-skim--applescript-with-argv script argv) script))
+            (result (condition-case err
+                        (do-applescript wrapped)
+                      (error (error "org-skim: %s" (error-message-string err)))))
+            (text (cond ((stringp result) result)
+                        ((numberp result) (number-to-string result))
+                        (t (format "%s" result)))))
+       (string-trim text)))
+    ('osascript
+     (with-temp-buffer
+       (insert script)
+       (let ((status (apply #'call-process-region
+                            (point-min) (point-max)
+                            "osascript" t t nil
+                            "-" argv)))
+         (unless (eq status 0)
+           (error "org-skim: %s" (string-trim (buffer-string))))
+         (string-trim (buffer-string)))))
+    (other (error "org-skim: unknown applescript backend %S" other))))
+
 (defun org-skim--toc-string ()
   "Return the front Skim document's table of contents as Org heading text.
 When `org-skim-toc-header-name' is a non-empty string, a root heading
 \(e.g. \"* TOC\") is placed above the outline and every extracted item is
-shifted down one level beneath it.  The string ends with a trailing
-newline.  The Skim link/target for each heading is not yet implemented
-and is therefore left blank."
+shifted down one level beneath it.  The Skim link/target for each heading
+is not yet implemented and is therefore left blank."
   (let* ((has-root (and (stringp org-skim-toc-header-name)
                         (not (string-empty-p org-skim-toc-header-name))))
          (base-level (if has-root 2 1))
-         (body (with-temp-buffer
-                 ;; Feed the script to osascript on stdin (the "-" argument)
-                 ;; and let it replace the buffer with the script's output.
-                 (insert org-skim--toc-applescript)
-                 (let ((status (call-process-region
-                                (point-min) (point-max)
-                                "osascript" t t nil
-                                "-"
-                                (char-to-string org-skim-toc-header-char)
-                                (number-to-string base-level))))
-                   (unless (eq status 0)
-                     (error "org-skim: %s" (string-trim (buffer-string))))
-                   (buffer-string)))))
+         (body (org-skim--run-applescript
+                org-skim--toc-applescript
+                (char-to-string org-skim-toc-header-char)
+                (number-to-string base-level))))
     (if has-root
         (concat (char-to-string org-skim-toc-header-char) " "
-                org-skim-toc-header-name "\n" body)
-      body)))
+                org-skim-toc-header-name "\n" body "\n")
+      (concat body "\n"))))
+
+;;; Page navigation
+
+(defun org-skim-current-page ()
+  "Return the 1-based index of the current page in the front Skim document."
+  (string-to-number
+   (org-skim--run-applescript
+    "tell application \"Skim\"
+        if (count of documents) is 0 then error \"No document open in Skim.\"
+        return (index of current page of front document) as string
+end tell")))
+
+;;;###autoload
+(defun org-skim-next-page ()
+  "Go to the next page in the front Skim document."
+  (interactive)
+  (org-skim--run-applescript
+   "tell application \"Skim\"
+        if (count of documents) is 0 then error \"No document open in Skim.\"
+        tell front document
+                set n to (index of current page)
+                if n < (count of pages) then go it to page (n + 1) of it
+        end tell
+end tell"))
+
+;;;###autoload
+(defun org-skim-previous-page ()
+  "Go to the previous page in the front Skim document."
+  (interactive)
+  (org-skim--run-applescript
+   "tell application \"Skim\"
+        if (count of documents) is 0 then error \"No document open in Skim.\"
+        tell front document
+                set n to (index of current page)
+                if n > 1 then go it to page (n - 1) of it
+        end tell
+end tell"))
 
 ;;; Commands
 
