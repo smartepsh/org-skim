@@ -141,6 +141,16 @@ the top of any command that requires a front document."
                   end tell") "0")
     (user-error "No document open in Skim")))
 
+;;;###autoload
+(defun org-skim-save-document ()
+  "Save the front Skim document."
+  (interactive)
+  (org-skim--ensure-document)
+  (org-skim--run-applescript
+   "tell application \"Skim\"
+     save front document
+   end tell"))
+
 (defun org-skim--front-document-info ()
   "Return an alist of facts about the front Skim document.
 Keys: `name' (display name), `path' (POSIX path), `page' (1-based page

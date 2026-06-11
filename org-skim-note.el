@@ -151,6 +151,7 @@ If no such note exists, create a new one with the key icon."
                 set icon of n to key icon
         end if
 end tell"))
+    (org-skim-save-document)
     key))
 
 (provide 'org-skim-note)
