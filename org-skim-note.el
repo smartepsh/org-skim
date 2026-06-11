@@ -105,6 +105,44 @@ If no matching note is found, returns nil."
           (when (string-match org-skim--bibtex-key-regexp text)
             (throw 'found (match-string 1 text))))))))
 
+(defconst org-skim--org-id-regexp ":SKIM:ORG_ID:\\([^:]+\\):"
+  "Regexp matching a Skim-embedded Org ID in note text.
+The ID is captured in group 1.")
+
+;;;###autoload
+(defun org-skim-get-org-id ()
+  "Return the Org ID embedded in the active note, or signal an error.
+
+Looks for the pattern \":SKIM:ORG_ID:ID:\" in the text of the currently
+selected note in Skim and returns ID as a string.  Signals a `user-error'
+if no note is selected."
+  (org-skim--ensure-document)
+  (let ((note (org-skim-get-active-note)))
+    (unless note
+      (user-error "No note selected in Skim"))
+    (let ((text (plist-get note :text)))
+      (if (string-match org-skim--org-id-regexp text)
+          (match-string 1 text)
+        (user-error "No Org ID found in the active note")))))
+
+(defcustom org-skim-open-org-note-function 'org-id-find
+  "Function called to open an Org note by ID.
+Receives the ID string as its sole argument.  The default,
+`org-id-find', navigates to the heading with that ID."
+  :type '(choice (function :tag "Function")
+                 (const :tag "org-id-find" org-id-find))
+  :group 'org-skim)
+
+;;;###autoload
+(defun org-skim-open-org-note ()
+  "Open the Org note whose ID is embedded in the active Skim note.
+Calls `org-skim-open-org-note-function' with the ID extracted from
+the pattern \":SKIM:ORG_ID:ID:\" in the active note.  Signals a
+`user-error' if no note is selected or no Org ID is found."
+  (interactive)
+  (let ((id (org-skim-get-org-id)))
+    (funcall org-skim-open-org-note-function id)))
+
 (defcustom org-skim-note-icon-size 16
   "Size in points of the anchored note icon for BibTeX keys.
 Used to calculate the note bounds on page 1."
