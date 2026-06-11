@@ -39,6 +39,8 @@
 (declare-function org-end-of-subtree "org" (&optional invisible-ok to-heading))
 (declare-function org-end-of-meta-data "org" (&optional full))
 (declare-function citar-get-value "citar" (field key-or-entry))
+(declare-function citar-get-files "citar" (&optional key-or-keys))
+(declare-function org-entry-get "org" (pom property &optional inherit literal-nil))
 
 (defvar org-note-abort)
 (defvar org-capture-templates)
@@ -470,6 +472,113 @@ single key binding for the Skim note workflow."
          (id (plist-get note :org-id))
          (content (and id (org-skim--org-note-content id))))
     (or content (org-skim-capture-note))))
+
+(defcustom org-skim-open-note-extensions '("pdf")
+  "File extensions `org-skim-open-note-in-skim' will open in Skim.
+Each is a lowercase extension without a leading dot.  When the
+heading's REFERENCES citekey resolves to several files, the first
+one whose extension is a member of this list is opened.  Only
+\"pdf\" is supported for now; the list shape lets it grow later."
+  :type '(repeat string)
+  :group 'org-skim)
+
+(defun org-skim--skim-note-at-point ()
+  "Return a plist describing the Skim note for the Org heading at point, or nil.
+
+The plist has keys `:page' (1-based integer), `:id' (the Org ID
+string), and `:citekey' (the REFERENCES citekey with any leading
+\"@\" stripped).  `SKIM_PAGE' and `ID' are read from the heading
+itself; `REFERENCES' is read with inheritance, so it resolves from
+the file-level property drawer no matter how deeply the heading is
+nested.  Returns nil when any of the three is absent."
+  (require 'org)
+  (let* ((page (org-entry-get (point) "SKIM_PAGE"))
+         (id (org-entry-get (point) "ID"))
+         (references (org-entry-get (point) "REFERENCES" t)))
+    (when (and page (not (string-empty-p page))
+               id (not (string-empty-p id))
+               references (not (string-empty-p references)))
+      (list :page (string-to-number page)
+            :id id
+            :citekey (string-remove-prefix "@" (string-trim references))))))
+
+(defun org-skim--citar-file-for-citekey (citekey)
+  "Return the first file of CITEKEY whose extension is allowed, or nil.
+Allowed extensions are `org-skim-open-note-extensions', matched
+case-insensitively.  Resolves files via citar; signals a
+`user-error' when citar is not installed."
+  (unless (require 'citar nil t)
+    (user-error "Citar is not installed; cannot resolve citekey %s" citekey))
+  (let ((files (gethash citekey (citar-get-files citekey))))
+    (seq-find
+     (lambda (file)
+       (member (downcase (or (file-name-extension file) ""))
+               org-skim-open-note-extensions))
+     files)))
+
+(defconst org-skim--open-note-applescript
+  "on run argv
+	set thePath to item 1 of argv
+	set thePage to (item 2 of argv) as integer
+	set theId to item 3 of argv
+	set marker to \":SKIM:ORG_ID:\" & theId & \":\"
+	tell application \"Skim\"
+		set theAlias to POSIX file thePath as alias
+		open theAlias
+		set targetDoc to missing value
+		repeat with i from 1 to (count of documents)
+			set d to document i
+			try
+				set dp to POSIX path of (file of d as alias)
+				if dp is thePath then
+					set targetDoc to d
+					exit repeat
+				end if
+			end try
+		end repeat
+		if targetDoc is missing value then set targetDoc to front document
+		set thePageRef to page thePage of targetDoc
+		go targetDoc to thePageRef
+		repeat with n in (every note of thePageRef)
+			if (text of n) contains marker then
+				set active note of targetDoc to n
+				exit repeat
+			end if
+		end repeat
+	end tell
+end run"
+  "AppleScript that opens a PDF and selects the note carrying an Org ID.
+Arguments: POSIX path, page index, and Org ID.  Opens the file,
+finds the matching open document, goes to the page, then sets as
+the active note the first note on that page whose text contains
+\":SKIM:ORG_ID:<id>:\".  Uses no `activate', so Emacs keeps focus.")
+
+;;;###autoload
+(defun org-skim-open-note-in-skim ()
+  "Open the Skim note for the Org heading at point in Skim.
+
+The heading must carry `SKIM_PAGE' and `ID' properties and inherit
+a `REFERENCES' citekey (typically from the file-level property
+drawer).  The citekey is resolved to a file via citar; the first
+file whose extension is in `org-skim-open-note-extensions' is
+opened in Skim, navigated to `SKIM_PAGE', and the note bearing this
+heading's Org ID is selected.  Focus stays on Emacs.
+
+When the heading is not a Skim note (any of the three properties
+missing), print a message and do nothing."
+  (interactive)
+  (let ((note (org-skim--skim-note-at-point)))
+    (if (null note)
+        (message "Not a Skim note: heading needs SKIM_PAGE, ID, and a REFERENCES citekey")
+      (let* ((citekey (plist-get note :citekey))
+             (file (or (org-skim--citar-file-for-citekey citekey)
+                       (user-error "No %s file for citekey %s"
+                                   (string-join org-skim-open-note-extensions "/")
+                                   citekey))))
+        (org-skim--run-applescript org-skim--open-note-applescript
+                                   (expand-file-name file)
+                                   (number-to-string (plist-get note :page))
+                                   (plist-get note :id))))))
 
 (provide 'org-skim-note)
 
