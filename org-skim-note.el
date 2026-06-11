@@ -13,16 +13,33 @@
 ;;                               selected note in the front Skim document,
 ;;                               or nil if no note is selected.
 ;;
-;; The plist keys are `:type', `:page', `:text', and `:bounds'.
+;; The plist keys are `:type', `:page', `:text', `:org-id', and `:bounds'.
 ;; `:type' is the note type string (e.g. \"note\", \"underline note\",
 ;; \"highlight note\", \"strike out note\").
 ;; `:page' is a 1-based integer.
-;; `:text' is the note text (for markup notes, this is the PDF text).
+;; `:text' is the note text (for markup notes, this is the PDF text),
+;; with any embedded \":SKIM:ORG_ID:...:\" marker removed.
+;; `:org-id' is the embedded Org ID string, or nil.
 ;; `:bounds' is a list of four floats (left, top, right, bottom).
+;;
+;;   `org-skim-capture-note'     org-capture an Org heading for the active
+;;                               Skim note, embedding a shared Org ID.
 
 ;;; Code:
 
+(require 'subr-x)
 (require 'org-skim-helpers)
+
+(declare-function org-capture "org-capture" (&optional goto keys))
+(declare-function org-capture-get "org-capture" (prop &optional local))
+(declare-function org-capture-target-buffer "org-capture" (file))
+(declare-function org-id-new "org-id" (&optional prefix))
+(declare-function org-id-add-location "org-id" (id file))
+(declare-function citar-get-value "citar" (field key-or-entry))
+
+(defvar org-note-abort)
+(defvar org-capture-templates)
+(defvar citar-notes-paths)
 
 (defconst org-skim--note-field-separator "\x1f"
   "Delimiter used between fields in the active-note AppleScript reply.")
@@ -51,26 +68,33 @@ Returns an empty string when no note is selected.")
 (defun org-skim-get-active-note ()
   "Return a plist describing the currently selected note in Skim, or nil.
 
-The plist has the keys `:type', `:page', `:text', and `:bounds'.
-`:page' is a 1-based integer (or nil if unavailable); `:type' and
-`:text' are strings.  `:bounds' is a list of four floats (left,
-top, right, bottom) or nil.  Returns nil when no note is selected
-in the front document."
+The plist has the keys `:type', `:page', `:text', `:org-id', and
+`:bounds'.  `:page' is a 1-based integer (or nil if unavailable);
+`:type' and `:text' are strings.  `:text' has any embedded
+\":SKIM:ORG_ID:...:\" marker removed; the ID itself is returned
+under `:org-id' (or nil if absent).  `:bounds' is a list of four
+floats (left, top, right, bottom) or nil.  Returns nil when no
+note is selected in the front document."
   (org-skim--ensure-document)
   (let ((raw (org-skim--run-applescript org-skim--active-note-applescript)))
     (when (and (stringp raw) (not (string-empty-p raw)))
       (let* ((parts (split-string raw org-skim--note-field-separator))
              (type (nth 0 parts))
              (page-str (nth 1 parts))
-             (text (replace-regexp-in-string
-                    org-skim--org-id-regexp ""
-                    (nth 2 parts)))
+             (raw-text (nth 2 parts))
+             (org-id (and (string-match org-skim--org-id-regexp raw-text)
+                          (match-string 1 raw-text)))
+             (text (string-trim
+                    (replace-regexp-in-string
+                     (concat org-skim--org-id-regexp "\n?") ""
+                     raw-text)))
              (bounds-str (nth 3 parts)))
         (list :type type
               :page (and page-str
                          (not (string-empty-p page-str))
                          (string-to-number page-str))
               :text text
+              :org-id org-id
               :bounds (and bounds-str
                            (not (string-empty-p bounds-str))
                            (mapcar #'string-to-number
@@ -118,14 +142,11 @@ If no matching note is found, returns nil."
 Looks for the pattern \":SKIM:ORG_ID:ID:\" in the text of the currently
 selected note in Skim and returns ID as a string.  Signals a `user-error'
 if no note is selected."
-  (org-skim--ensure-document)
   (let ((note (org-skim-get-active-note)))
     (unless note
       (user-error "No note selected in Skim"))
-    (let ((text (plist-get note :text)))
-      (if (string-match org-skim--org-id-regexp text)
-          (match-string 1 text)
-        (user-error "No Org ID found in the active note")))))
+    (or (plist-get note :org-id)
+        (user-error "No Org ID found in the active note"))))
 
 (defcustom org-skim-open-org-note-function 'org-id-find
   "Function called to open an Org note by ID.
@@ -193,6 +214,209 @@ If no such note exists, create a new one with the key icon."
 end tell"))
     (org-skim-save-document)
     key))
+
+(defcustom org-skim-note-file-function #'org-skim--citar-note-file
+  "Function mapping a BibTeX key to the Org notes file path.
+Receives the citekey string and returns an absolute file name.
+The default resolves through citar's file-per-key notes layout."
+  :type 'function
+  :group 'org-skim)
+
+(defcustom org-skim-capture-template
+  "* %(org-skim-capture-value :heading)
+:PROPERTIES:
+:ID:        %(org-skim-capture-value :id)
+:REFERENCES: @%(org-skim-capture-value :citekey)
+:SKIM_PAGE: %(org-skim-capture-value :page)
+:END:
+%?"
+  "Org capture template used by `org-skim-capture-note'.
+Use `%(org-skim-capture-value KEY)' to splice in fields of the
+pending Skim note: `:id', `:citekey', `:page', `:text' (the full
+note text), or `:heading' (the note text collapsed to one line)."
+  :type 'string
+  :group 'org-skim)
+
+(defcustom org-skim-note-title-template "Notes on ${title}/${year}"
+  "Template for the #+title of a newly created notes file.
+${...} variables are resolved from the citekey's bibliography
+entry via citar: `title', `author', `year', and `citekey'.
+Missing fields expand to the citekey (for `title') or an empty
+string; unknown variables are left in place."
+  :type 'string
+  :group 'org-skim)
+
+(defcustom org-skim-note-filetags "ReadingNote"
+  "Tag(s) for the #+filetags keyword of a newly created notes file.
+Surrounding colons are added automatically; use \"a:b\" for
+multiple tags.  Set to nil to omit the #+filetags line."
+  :type '(choice (const :tag "None" nil) string)
+  :group 'org-skim)
+
+(defcustom org-skim-note-references-property "REFERENCES"
+  "File-level property naming the @citekey reference in new notes files.
+Set to nil to omit the property.  Note that the property used in
+captured headings is spelled out in `org-skim-capture-template'."
+  :type '(choice (const :tag "None" nil) string)
+  :group 'org-skim)
+
+(defvar org-skim--pending-capture nil
+  "Plist describing the Skim note currently being captured.
+Keys are `:id', `:citekey', `:page', `:text', and `:heading'.
+Set by `org-skim-capture-note' and cleared when the capture
+finalizes or aborts.")
+
+(defun org-skim-capture-value (key)
+  "Return field KEY of the pending Skim capture as a string.
+Intended for `%(...)' escapes in `org-skim-capture-template'."
+  (let ((value (plist-get org-skim--pending-capture key)))
+    (cond ((numberp value) (number-to-string value))
+          ((stringp value) value)
+          (t ""))))
+
+(defun org-skim--single-line (text)
+  "Return TEXT with line breaks collapsed to single spaces."
+  (string-trim (replace-regexp-in-string "[\n\r]+" " " (or text ""))))
+
+(defun org-skim--citar-note-file (citekey)
+  "Resolve CITEKEY to its notes file inside `citar-notes-paths'.
+The file is named after the title expanded from
+`org-skim-note-title-template', with \"/\" replaced by \"-\"."
+  (unless (require 'citar nil t)
+    (user-error "Citar is not installed; customize `org-skim-note-file-function'"))
+  (expand-file-name
+   (concat (replace-regexp-in-string "/" "-" (org-skim--note-title citekey))
+           ".org")
+   (car citar-notes-paths)))
+
+(defun org-skim--citar-field (field citekey)
+  "Return FIELD of CITEKEY's bibliography entry via citar, or nil."
+  (and (require 'citar nil t)
+       (ignore-errors (citar-get-value field citekey))))
+
+(defun org-skim--note-expand (template vars)
+  "Expand ${...} variables in TEMPLATE against the string alist VARS.
+Unknown variables are left in place."
+  (replace-regexp-in-string
+   "\\${\\([^}]+\\)}"
+   (lambda (m)
+     (or (cdr (assoc (match-string 1 m) vars)) m))
+   template t t))
+
+(defun org-skim--note-title (citekey)
+  "Return the note title for CITEKEY per `org-skim-note-title-template'.
+${...} variables are resolved from the citekey's bibliography
+entry via citar."
+  (let* ((title (or (org-skim--citar-field "title" citekey) citekey))
+         (year (or (org-skim--citar-field "year" citekey)
+                   (let ((date (org-skim--citar-field "date" citekey)))
+                     (and date (>= (length date) 4) (substring date 0 4)))
+                   ""))
+         (author (or (org-skim--citar-field "author" citekey) ""))
+         (vars (list (cons "title" title)
+                     (cons "year" year)
+                     (cons "author" author)
+                     (cons "citekey" citekey))))
+    (org-skim--note-expand org-skim-note-title-template vars)))
+
+(defun org-skim--new-note-frontmatter (citekey)
+  "Return the file-level frontmatter for a new notes file for CITEKEY.
+Comprises a property drawer with a fresh Org ID and the
+`org-skim-note-references-property', a #+title expanded from
+`org-skim-note-title-template', #+filetags from
+`org-skim-note-filetags', and a #+created date stamp."
+  (concat
+   ":PROPERTIES:\n"
+   ":ID:       " (org-id-new) "\n"
+   (and org-skim-note-references-property
+        (format ":%s: @%s\n" org-skim-note-references-property citekey))
+   ":END:\n"
+   "#+title: " (org-skim--note-title citekey) "\n"
+   (and org-skim-note-filetags
+        (format "#+filetags: :%s:\n"
+                (string-trim org-skim-note-filetags ":+" ":+")))
+   "#+created: " (format-time-string "[%Y-%m-%d]") "\n\n"))
+
+(defun org-skim--capture-target ()
+  "Position point for capturing the pending Skim note.
+Opens the notes file for the pending citekey, inserting the
+file-level frontmatter when the file is new, and moves to its end."
+  (let* ((citekey (plist-get org-skim--pending-capture :citekey))
+         (file (funcall org-skim-note-file-function citekey)))
+    (set-buffer (org-capture-target-buffer file))
+    (when (= (buffer-size) 0)
+      (insert (org-skim--new-note-frontmatter citekey)))
+    (goto-char (point-max))))
+
+(defun org-skim--capture-after-finalize ()
+  "Register the captured heading's Org ID; clear the pending capture.
+No-op for captures not started by `org-skim-capture-note'."
+  (when org-skim--pending-capture
+    (unless org-note-abort
+      (let ((file (buffer-file-name (org-capture-get :buffer))))
+        (when file
+          (org-id-add-location (plist-get org-skim--pending-capture :id)
+                               file))))
+    (setq org-skim--pending-capture nil)))
+
+(add-hook 'org-capture-after-finalize-hook #'org-skim--capture-after-finalize)
+
+(defconst org-skim--embed-org-id-applescript
+  "on run argv
+	set theLine to item 1 of argv
+	tell application \"Skim\"
+		set n to active note of front document
+		if n is missing value then error \"No note selected in Skim.\"
+		set text of n to theLine & linefeed & (text of n)
+	end tell
+end run"
+  "AppleScript prepending its first argument as a line to the active note.")
+
+(defun org-skim--embed-org-id (id)
+  "Prepend the \":SKIM:ORG_ID:ID:\" marker line to the active Skim note.
+Saves the document and returns ID."
+  (org-skim--ensure-document)
+  (org-skim--run-applescript org-skim--embed-org-id-applescript
+                             (format ":SKIM:ORG_ID:%s:" id))
+  (org-skim-save-document)
+  id)
+
+;;;###autoload
+(defun org-skim-capture-note ()
+  "Capture an Org heading for the active note in Skim.
+
+Generates a fresh Org ID (reusing one already embedded in the
+note, if any), prepends the \":SKIM:ORG_ID:...:\" marker line to
+the Skim note text, then starts an org-capture into the notes
+file for the document's BibTeX key (see
+`org-skim-note-file-function' and `org-skim-capture-template').
+On finalize, the ID is registered with `org-id-add-location' so
+`org-skim-open-org-note' can resolve it."
+  (interactive)
+  (require 'org-id)
+  (require 'org-capture)
+  (org-skim--ensure-document)
+  (let* ((note (or (org-skim-get-active-note)
+                   (user-error "No note selected in Skim")))
+         (citekey (or (org-skim-bibtex-key)
+                      (user-error "No BibTeX key note on page 1 in Skim")))
+         (id (or (plist-get note :org-id)
+                 (org-skim--embed-org-id (org-id-new))))
+         (text (plist-get note :text)))
+    (setq org-skim--pending-capture
+          (list :id id
+                :citekey citekey
+                :page (plist-get note :page)
+                :text text
+                :heading (org-skim--single-line text)))
+    (condition-case err
+        (let ((org-capture-templates
+               `(("s" "Skim note" entry (function org-skim--capture-target)
+                  ,org-skim-capture-template :empty-lines-before 1))))
+          (org-capture nil "s"))
+      ((error quit)
+       (setq org-skim--pending-capture nil)
+       (signal (car err) (cdr err))))))
 
 (provide 'org-skim-note)
 
