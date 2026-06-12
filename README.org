@@ -46,6 +46,7 @@ Drive Skim's page navigation without leaving Emacs:
 
 - ~M-x org-skim-next-page~ — advance the front Skim document by one page (no-op on the last page).
 - ~M-x org-skim-previous-page~ — go back one page (no-op on the first page).
+- ~M-x org-skim-goto-page~ — jump to a specific page.  A numeric prefix argument supplies the page (~C-u 12 M-x org-skim-goto-page~); with no prefix it prompts, defaulting to the current page.  The page is clamped to the valid range, so out-of-range values land on the first or last page.  Lisp/emacsclient callers pass it directly: ~(org-skim-goto-page 12)~.
 - ~(org-skim-current-page)~ — non-interactive; returns the current page index (1-based integer) of the front Skim document.
 
 ** Page links
@@ -74,8 +75,9 @@ From a selected note in Skim:
 
 - ~M-x org-skim-capture-note~ — start an ~org-capture~ for the selected Skim note.  Generates (or reuses) a shared Org ID, prepends the marker line to the note, and captures into the notes file for the document's citekey, following ~org-skim-capture-template~.  A new notes file gets a frontmatter built from ~org-skim-note-title-template~, ~org-skim-note-filetags~, and ~org-skim-note-references-property~.  Set ~org-skim-capture-in-new-frame~ to run the capture in a dedicated frame that is deleted when you finalize or abort.
 - ~M-x org-skim-open-org-note~ — jump to the Org heading linked to the selected Skim note (via ~org-skim-open-org-note-function~, default ~org-id-find~).
+- ~M-x org-skim-view-org-note~ — display the linked Org heading narrowed to its subtree.  Honours ~org-skim-view-note-in-new-frame~ (open in a dedicated frame, reusing ~org-skim-capture-frame-parameters~).  Widen with ~C-x n w~; close a view frame with ~C-x 5 0~.
 - ~M-x org-skim-read-org-note~ — return the linked heading's body (heading and drawers stripped) as a string, without displaying a buffer.
-- ~M-x org-skim-note-dwim~ — if the selected note already links to an existing Org entry, read it (as ~org-skim-read-org-note~); otherwise capture one (as ~org-skim-capture-note~).  Intended as the single key binding for the workflow.
+- ~M-x org-skim-note-dwim~ — if the selected note already links to an existing Org entry, view it narrowed to its subtree (as ~org-skim-view-org-note~); otherwise capture one (as ~org-skim-capture-note~).  Intended as the single key binding for the workflow.  A prefix argument (the optional ~SAME-FRAME~ argument, also accepted by ~org-skim-capture-note~ and ~org-skim-view-org-note~) forces the current frame instead of the configured new-frame behaviour — useful from ~emacsclient~, e.g. ~(org-skim-note-dwim t)~.
 - ~M-x org-skim-set-bibtex-key~ — set (or update) the page-1 key-icon note that records the document's BibTeX key.
 
 From an Org heading in Emacs:
@@ -125,7 +127,8 @@ Debug mode is off by default and intended only for development.
 | ~org-skim-note-file-function~       | ~org-skim--citar-note-file~   | Function mapping a citekey to its Org notes file (default resolves through citar's file-per-key layout).                     |
 | ~org-skim-capture-template~         | (see docstring)               | ~org-capture~ template used by ~org-skim-capture-note~; splice note fields with ~%(org-skim-capture-value KEY)~.             |
 | ~org-skim-capture-in-new-frame~     | ~nil~                         | When non-nil, run ~org-skim-capture-note~ in a dedicated frame, auto-deleted on finalize/abort (graphical Emacs only).      |
-| ~org-skim-capture-frame-parameters~ | (see docstring)               | ~make-frame~ parameters for the capture frame when ~org-skim-capture-in-new-frame~ is non-nil.                              |
+| ~org-skim-view-note-in-new-frame~   | ~nil~                         | When non-nil, ~org-skim-view-org-note~ (and the read branch of ~org-skim-note-dwim~) opens the note in a dedicated frame.   |
+| ~org-skim-capture-frame-parameters~ | (see docstring)               | ~make-frame~ parameters for the dedicated capture and view frames (used when either ~*-in-new-frame~ option is non-nil).    |
 | ~org-skim-note-title-template~      | ~"Notes on ${title}/${year}"~ | Template for the ~#+title~ of a newly created notes file (citar fields ~title~, ~author~, ~year~, ~citekey~).                |
 | ~org-skim-note-filetags~            | ~"ReadingNote"~               | Tag(s) for the ~#+filetags~ of a new notes file; ~nil~ omits the line.                                                       |
 | ~org-skim-note-references-property~ | ~"REFERENCES"~                | File-level property naming the ~@citekey~ reference in new notes files; ~nil~ omits it.                                      |

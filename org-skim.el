@@ -144,6 +144,38 @@ end tell"))
         end tell
 end tell"))
 
+(defconst org-skim--goto-page-applescript
+  "on run argv
+	set n to (item 1 of argv) as integer
+	tell application \"Skim\"
+		tell front document
+			set total to count of pages
+			if n < 1 then set n to 1
+			if n > total then set n to total
+			go it to page n of it
+		end tell
+	end tell
+end run"
+  "AppleScript jumping the front document to the page in its first argument.
+The requested page is clamped to the valid range [1, page count].")
+
+;;;###autoload
+(defun org-skim-goto-page (page)
+  "Go to PAGE (a 1-based integer) in the front Skim document.
+PAGE is clamped to the valid range; values below 1 go to the
+first page and values past the last go to the last page.
+
+Interactively, a numeric prefix argument supplies PAGE; with no
+prefix, prompt for it in the minibuffer, defaulting to the
+current page."
+  (interactive
+   (list (cond ((integerp current-prefix-arg) current-prefix-arg)
+               (current-prefix-arg (prefix-numeric-value current-prefix-arg))
+               (t (read-number "Go to page: " (org-skim-current-page))))))
+  (org-skim--ensure-document)
+  (org-skim--run-applescript org-skim--goto-page-applescript
+                             (number-to-string page)))
+
 ;;; Page links
 
 (defun org-skim--page-link-string ()
