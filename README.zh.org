@@ -1,0 +1,185 @@
+#+TITLE: org-skim
+
+通过 AppleScript 将 [[https://skim-app.sourceforge.io/][Skim]] PDF 阅读器与 Org mode 集成的 Emacs 插件。可提取 PDF 目录并生成 Org 标题树，从 Emacs 驱动 Skim 翻页，管理书签（含文件夹书签），逐行控制阅读栏，以及在 Skim 批注与 Org 标题之间双向跳转。
+
+English documentation: [[file:README.org][README.org]]。
+
+* 依赖
+
+- macOS，且已安装 [[https://skim-app.sourceforge.io/][Skim]]（本插件通过 AppleScript 驱动 Skim）。
+- Emacs 26.1 或更新版本。GUI 构建版本会自动使用内置的 ~do-applescript~；终端版本则退回到调用 ~osascript~ 子进程。
+
+* 安装
+
+** straight.el / use-package
+
+#+begin_src emacs-lisp
+  (use-package org-skim
+    :straight (org-skim :type git :host github :repo "smartepsh/org-skim")
+    :config
+    (setq org-skim-capture-in-new-frame t
+          org-skim-view-note-in-new-frame t
+          org-skim-page-link-format "${title} P.${page}"
+          org-skim-bookmark-name-format "P.${page}"
+          org-skim-open-org-note-function 'vulpea-visit ;; 使用 vulpea 管理笔记
+          org-skim-note-title-template "Notes on ${title}/${year}"
+          org-skim-note-filetags "ReadingNote"
+          org-skim-note-references-property "REFERENCES"))
+#+end_src
+
+** package-vc（Emacs 29+ 内置）
+
+#+begin_src emacs-lisp
+(package-vc-install "https://github.com/smartepsh/org-skim")
+#+end_src
+
+Emacs 30+ 可配合 ~use-package~ 声明式安装：
+
+#+begin_src emacs-lisp
+(use-package org-skim
+  :vc (:url "https://github.com/smartepsh/org-skim" :rev :newest))
+#+end_src
+
+* 使用场景
+
+以下列出常见工作流及对应函数。所有命令均需在 Skim 中打开至少一个 PDF。
+
+** 用书签标记页面
+
+标记想要回顾的页面，之后直接从 Emacs 跳转。
+
+- ~M-x org-skim-bookmark-add~ — 为当前页添加书签。
+- ~M-x org-skim-goto-bookmark~ — 通过补全选择书签并跳转。
+- ~M-x org-skim-bookmark-remove~ — 删除不再需要的书签。
+
+** 将目录插入 Org
+
+将当前 PDF 的大纲提取为 Org 标题树，插入笔记。
+
+- ~M-x org-skim-insert-toc~ — 在光标处插入目录。
+- ~M-x org-skim-yank-toc~ — 复制到剪贴环。
+
+每个标题都是可点击的 ~skim:~ 链接，按 ~C-c C-o~ 可跳转到 Skim 中对应页面。
+
+** 将页面链接插入 Org（Skim → Org）
+
+为当前页生成永久链接，方便日后跳回。
+
+- ~M-x org-skim-insert-page-link~ — 在光标处插入 ~[[skim:PATH::PAGE][TITLE P.N]]~ 链接。
+- ~M-x org-skim-yank-page-link~ — 复制到剪贴环。
+
+跟随链接（~C-c C-o~）会在 Skim 中打开对应 PDF 并跳转到该页。
+
+** 将 Skim 批注与 Org 标题双向关联
+
+通过共享 Org ID，将 Skim 批注与 Org 标题绑定，之后可在两者之间双向跳转。
+
+从 Skim 侧（需要 ~org-skim-note~）：
+
+- ~M-x org-skim-note-dwim~ — 主入口。若已关联则显示 Org 条目；否则发起捕获。
+- ~M-x org-skim-capture-note~ — 强制新建捕获，即使已有关联。
+- ~M-x org-skim-view-org-note~ — 以子树形式打开已关联的 Org 条目。
+- ~M-x org-skim-open-org-note~ — 跳转到已关联的 Org 标题（不窄化缓冲区）。
+
+从 Org 侧（需要 ~org-skim-note~）：
+
+- ~M-x org-skim-open-note-in-skim~ — 打开 PDF，跳转到对应页面，并选中与当前标题关联的批注。
+- ~M-x org-skim-open-note-in-skim-by-id~ — 同上，通过明确的 Org ID（或光标处的 ~id:~ 链接 / ~ID~ 属性）解析。
+
+** 控制阅读栏
+
+无需鼠标，逐行推进阅读。
+
+- ~M-x org-skim-toggle-reading-bar~ — 显示或隐藏阅读栏。
+- ~M-x org-skim-reading-bar-next-line~ — 前进一行（到页底自动翻页）。
+- ~M-x org-skim-reading-bar-previous-line~ — 后退一行（到页顶自动翻页）。
+
+建议将这几个命令绑定到快捷键，以获得流畅的跟读体验。
+
+* 函数参考
+
+** 目录
+
+- ~M-x org-skim-insert-toc~ — 在光标处插入前台 Skim 文档的目录，每个标题是可点击的 ~skim:~ 链接。
+- ~M-x org-skim-yank-toc~ — 复制目录到剪贴环。
+
+大纲以 Org 标题树形式呈现，层级由重复 ~org-skim-toc-header-char~ 表示。
+
+** 页面导航
+
+- ~M-x org-skim-next-page~ — 向前翻一页（末页时无效）。
+- ~M-x org-skim-previous-page~ — 向后翻一页（首页时无效）。
+- ~M-x org-skim-goto-page~ — 跳转到指定页。数字前缀参数直接指定页码（如 ~C-u 12 M-x org-skim-goto-page~）；无前缀时交互输入，默认为当前页。越界值自动截断。Lisp 调用：~(org-skim-goto-page 12)~。
+- ~(org-skim-current-page)~ — 非交互式，返回当前页的 1-based 页码。
+
+** 页面链接
+
+- ~M-x org-skim-insert-page-link~ — 在光标处插入 ~[[skim:PATH::PAGE][DESC]]~ 链接，~DESC~ 由 ~org-skim-page-link-format~ 渲染。
+- ~M-x org-skim-yank-page-link~ — 复制链接到剪贴环。
+- ~org-skim-open-page-link~ — 注册为 ~skim:~ 链接处理器，由 ~org-open-at-point~ 调用。
+
+** 书签
+
+- ~M-x org-skim-bookmark-add~ — 在当前页添加书签。默认名称取自 ~org-skim-bookmark-name-format~；前缀参数（或 ~org-skim-bookmark-prompt-name~ 非 nil）时提示输入名称，预填内容来自 ~org-skim-bookmark-prompt-format~。存放位置由 ~org-skim-bookmark-container~ 决定。
+- ~M-x org-skim-bookmark-remove~ — 通过补全删除书签。
+- ~M-x org-skim-goto-bookmark~ — 在 Skim 中打开书签对应 PDF 并跳转。
+- ~(org-skim-bookmark-list)~ — 非交互式，返回所有文件书签，格式为 ~((folder name path page occurrence) ...)~，全局书签在前，按文件夹、文件名、书签名排序。
+
+** 笔记（需要 ~org-skim-note~）
+
+交互式命令：
+
+- ~M-x org-skim-note-dwim~ — 主入口。已关联则查看 Org 条目，否则发起捕获。前缀参数强制使用当前窗口。
+- ~M-x org-skim-capture-note~ — 为选中的 Skim 批注捕获 Org 标题，嵌入共享 Org ID。
+- ~M-x org-skim-view-org-note~ — 以子树形式查看已关联的 Org 条目，响应 ~org-skim-view-note-in-new-frame~。
+- ~M-x org-skim-open-org-note~ — 通过 ~org-skim-open-org-note-function~ 跳转到已关联的 Org 标题。
+- ~M-x org-skim-read-org-note~ — 以字符串返回已关联标题的正文，不显示缓冲区。
+- ~M-x org-skim-open-note-in-skim~ — 从 Org 侧打开 PDF 并在 Skim 中选中关联批注。
+- ~M-x org-skim-open-note-in-skim-by-id~ — 同上，通过 Org ID（~id:~ 链接、~ID~ 属性或 minibuffer 输入）解析。
+- ~M-x org-skim-set-bibtex-key~ — 在第 1 页设置或更新记录 BibTeX key 的 key-icon 批注。
+
+非交互式辅助函数：
+
+- ~(org-skim-get-active-note)~ — 返回当前选中批注的 plist ~(:type :page :text :org-id :bounds)~，无选中则返回 nil。
+- ~(org-skim-bibtex-key)~ — 返回嵌入在第 1 页的 BibTeX key，否则返回 nil。
+- ~(org-skim-get-org-id)~ — 返回选中批注中的 Org ID，无则报 ~user-error~。
+- ~(org-skim-capture-value KEY)~ — 用于 ~org-skim-capture-template~ 中的 ~%(...)~ 转义。
+
+** 阅读栏
+
+- ~M-x org-skim-show-reading-bar~ — 在当前页第一行显示阅读栏，已显示则无效。
+- ~M-x org-skim-hide-reading-bar~ — 隐藏阅读栏。
+- ~M-x org-skim-toggle-reading-bar~ — 切换显示/隐藏，开启时定位到当前页第一行。
+- ~M-x org-skim-reading-bar-next-line~ — 前进一行；到页底自动翻至下一页，末页末行时停止。
+- ~M-x org-skim-reading-bar-previous-line~ — 后退一行；到页顶自动翻至上一页。
+
+** 文档操作
+
+- ~M-x org-skim-save-document~ — 保存前台 Skim 文档。
+
+* 自定义选项
+
+| 变量                                | 默认值                        | 说明                                                                                                                         |
+|-------------------------------------+-------------------------------+------------------------------------------------------------------------------------------------------------------------------|
+| ~org-skim-toc-header-char~          | ~?*~                          | 用于构建各层级标题前缀的字符。                                                                                               |
+| ~org-skim-toc-header-name~          | ~"TOC"~                       | 插入大纲上方的根标题；条目自动下移一级。设为 ~nil~ 则不插入根标题。                                                          |
+| ~org-skim-page-link-format~         | ~"${title} P${page}"~         | 渲染页面链接描述的模板。                                                                                                     |
+| ~org-skim-bookmark-name-format~     | ~"P${page}"~                  | 静默添加书签时的默认名称模板。                                                                                               |
+| ~org-skim-bookmark-prompt-format~   | ~"${title} P${page}"~         | 提示输入书签名时的预填模板。                                                                                                 |
+| ~org-skim-bookmark-prompt-name~     | ~nil~                         | 非 nil 时，添加书签始终提示输入名称。前缀参数可逐次翻转此行为。                                                              |
+| ~org-skim-bookmark-container~       | ~auto~                        | 新书签的存放位置：~auto~ 每次提示，~nil~ 放在顶层，字符串则指定文件夹名。                                                    |
+| ~org-skim-open-org-note-function~   | ~org-id-find~                 | 通过 Org ID 打开笔记时调用的函数。                                                                                           |
+| ~org-skim-open-note-extensions~     | ~("pdf")~                     | ~org-skim-open-note-in-skim~ 会在 Skim 中打开的文件扩展名（小写，无前导点）。                                                |
+| ~org-skim-note-file-function~       | ~org-skim--citar-note-file~   | 将 citekey 映射到 Org 笔记文件的函数（默认通过 citar 的 file-per-key 布局解析）。                                            |
+| ~org-skim-capture-template~         | （见文档字符串）              | ~org-skim-capture-note~ 使用的 ~org-capture~ 模板；用 ~%(org-skim-capture-value KEY)~ 插入字段。                            |
+| ~org-skim-capture-in-new-frame~     | ~nil~                         | 非 nil 时，~org-skim-capture-note~ 在专用窗口中运行，完成/取消后自动关闭（仅图形 Emacs）。                                   |
+| ~org-skim-view-note-in-new-frame~   | ~nil~                         | 非 nil 时，~org-skim-view-org-note~ 在专用窗口中打开笔记。                                                                  |
+| ~org-skim-capture-frame-parameters~ | （见文档字符串）              | 捕获/查看专用窗口的 ~make-frame~ 参数。                                                                                      |
+| ~org-skim-note-title-template~      | ~"Notes on ${title}/${year}"~ | 新建笔记文件时 ~#+title~ 的模板（支持 citar 字段：~title~、~author~、~year~、~citekey~）。                                   |
+| ~org-skim-note-filetags~            | ~"ReadingNote"~               | 新建笔记文件的 ~#+filetags~；设为 ~nil~ 则省略该行。                                                                         |
+| ~org-skim-note-references-property~ | ~"REFERENCES"~                | 新建笔记文件中记录 ~@citekey~ 引用的文件级属性名；设为 ~nil~ 则省略。                                                        |
+| ~org-skim-note-icon-size~           | ~16~                          | ~org-skim-set-bibtex-key~ 创建的第 1 页 key-icon 批注的字号（点）。                                                         |
+| ~org-skim-applescript-backend~      | ~auto~                        | AppleScript 执行方式：~auto~（优先内置）、~do-applescript~（内置 OSA 桥接）或 ~osascript~（子进程）。                        |
+| ~org-skim-debug~                    | ~nil~                         | 非 nil 时强制使用 ~osascript~ 后端，并将 AppleScript 错误信息记录到 =*Messages*=。详见调试章节。                             |
+
+~org-skim-page-link-format~、~org-skim-bookmark-name-format~、~org-skim-bookmark-prompt-format~ 中支持的模板变量：~${title}~、~${file}~、~${path}~、~${page}~、~${date}~、~${time}~。未知变量原样保留。

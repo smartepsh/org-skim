@@ -2,6 +2,8 @@
 
 Emacs package that integrates the [[https://skim-app.sourceforge.io/][Skim]] PDF reader with Org mode via AppleScript.  Extract a PDF's table of contents as an Org heading tree to insert or yank, drive Skim's page navigation from Emacs, manage Skim bookmarks (including folder bookmarks), control its reading bar line by line, and link Skim annotations to Org headings you can jump between in either direction.
 
+中文文档请见 [[file:README.zh.org][README.zh.org]]。
+
 * Requirements
 
 - macOS with [[https://skim-app.sourceforge.io/][Skim]] installed (the package drives it via AppleScript).
@@ -12,8 +14,17 @@ Emacs package that integrates the [[https://skim-app.sourceforge.io/][Skim]] PDF
 ** straight.el / use-package
 
 #+begin_src emacs-lisp
-(use-package org-skim
-  :straight (org-skim :type git :host github :repo "smartepsh/org-skim"))
+  (use-package org-skim
+    :straight (org-skim :type git :host github :repo "smartepsh/org-skim")
+    :config
+    (setq org-skim-capture-in-new-frame t
+          org-skim-view-note-in-new-frame t
+          org-skim-page-link-format "${title} P.${page}"
+          org-skim-bookmark-name-format "P.${page}"
+          org-skim-open-org-note-function 'vulpea-visit ;; I'm using vulpea for note taking
+          org-skim-note-title-template "Notes on ${title}/${year}"
+          org-skim-note-filetags "ReadingNote"
+          org-skim-note-references-property "REFERENCES"))
 #+end_src
 
 ** package-vc (built-in, Emacs 29+)
@@ -31,85 +42,120 @@ Or declaratively with ~use-package~ on Emacs 30+:
 
 * Usage
 
-Open a PDF in Skim, then in Emacs:
+Common workflows and the functions that drive them.  Open a PDF in Skim first; all commands require a front document.
+
+** Reading with a bookmark trail
+
+Mark pages you want to return to, then jump back directly from Emacs.
+
+- ~M-x org-skim-bookmark-add~ — bookmark the current page.
+- ~M-x org-skim-goto-bookmark~ — pick a bookmark from completion and jump to it.
+- ~M-x org-skim-bookmark-remove~ — remove a bookmark you no longer need.
+
+** Inserting a TOC into Org
+
+Extract the front document's outline as an Org heading tree and drop it into a note.
+
+- ~M-x org-skim-insert-toc~ — insert the TOC at point.
+- ~M-x org-skim-yank-toc~ — copy it to the kill ring instead.
+
+Each heading is a clickable ~skim:~ link; follow with ~C-c C-o~ to jump to that page in Skim.
+
+** Linking a page into Org (Skim → Org)
+
+Capture a permanent link to the current page so you can jump back later.
+
+- ~M-x org-skim-insert-page-link~ — insert a ~[[skim:PATH::PAGE][TITLE P.N]]~ link at point.
+- ~M-x org-skim-yank-page-link~ — copy it to the kill ring.
+
+Following the link (with ~C-c C-o~) opens the PDF in Skim and jumps to that page.
+
+** Linking a Skim annotation to an Org heading (bidirectional)
+
+Tie a Skim note to an Org heading by embedding a shared Org ID.  Once linked, you can jump in either direction.
+
+From Skim (requires ~org-skim-note~):
+
+- ~M-x org-skim-note-dwim~ — the main entry point.  If the selected note is already linked, display the Org entry narrowed to its subtree; otherwise start a capture.
+- ~M-x org-skim-capture-note~ — force a new capture even if a link already exists.
+- ~M-x org-skim-view-org-note~ — open the linked Org entry narrowed to its subtree.
+- ~M-x org-skim-open-org-note~ — jump to the linked Org heading (no narrowing).
+
+From Org (requires ~org-skim-note~):
+
+- ~M-x org-skim-open-note-in-skim~ — open the PDF in Skim, navigate to the page, and select the note linked to the heading at point.
+- ~M-x org-skim-open-note-in-skim-by-id~ — same, but resolved by an explicit Org ID (or the ~id:~ link / ~ID~ property at point).
+
+** Controlling the reading bar
+
+Move through text line-by-line without touching the mouse.
+
+- ~M-x org-skim-toggle-reading-bar~ — show or hide the bar.
+- ~M-x org-skim-reading-bar-next-line~ — advance one line (rolls to the next page at the bottom).
+- ~M-x org-skim-reading-bar-previous-line~ — go back one line (rolls to the previous page at the top).
+
+Bind these to keys for a comfortable read-along experience.
+
+* Functions
 
 ** Table of contents
 
-- ~M-x org-skim-insert-toc~ — insert the front Skim document's table of contents at point in the current buffer.
-- ~M-x org-skim-yank-toc~ — copy the table of contents to the kill ring instead, so it can be pasted elsewhere.
+- ~M-x org-skim-insert-toc~ — insert the front Skim document's table of contents at point in the current buffer.  Each heading is a clickable ~skim:~ link.
+- ~M-x org-skim-yank-toc~ — copy the table of contents to the kill ring instead.
 
-The outline is rendered as a tree of Org headings, one per line, with the depth indicated by repeating the header character.
+The outline is rendered as a tree of Org headings whose depth is indicated by repeating ~org-skim-toc-header-char~.
 
 ** Page navigation
 
-Drive Skim's page navigation without leaving Emacs:
-
 - ~M-x org-skim-next-page~ — advance the front Skim document by one page (no-op on the last page).
 - ~M-x org-skim-previous-page~ — go back one page (no-op on the first page).
-- ~M-x org-skim-goto-page~ — jump to a specific page.  A numeric prefix argument supplies the page (~C-u 12 M-x org-skim-goto-page~); with no prefix it prompts, defaulting to the current page.  The page is clamped to the valid range, so out-of-range values land on the first or last page.  Lisp/emacsclient callers pass it directly: ~(org-skim-goto-page 12)~.
-- ~(org-skim-current-page)~ — non-interactive; returns the current page index (1-based integer) of the front Skim document.
+- ~M-x org-skim-goto-page~ — jump to a specific page.  A numeric prefix argument supplies the page (~C-u 12 M-x org-skim-goto-page~); with no prefix it prompts, defaulting to the current page.  Out-of-range values are clamped.  Lisp callers: ~(org-skim-goto-page 12)~.
+- ~(org-skim-current-page)~ — non-interactive; returns the 1-based current page index.
 
 ** Page links
 
-Capture an Org link to the current page of the front Skim document.  The description follows ~org-skim-page-link-format~ (default ~"${title} P${page}"~); the link target is intentionally left blank for now.
-
-- ~M-x org-skim-insert-page-link~ — insert the link at point.
+- ~M-x org-skim-insert-page-link~ — insert a ~[[skim:PATH::PAGE][DESC]]~ link at point.  ~DESC~ follows ~org-skim-page-link-format~.
 - ~M-x org-skim-yank-page-link~ — copy the link to the kill ring.
+- ~org-skim-open-page-link~ — registered as the ~skim:~ link handler; called by ~org-open-at-point~.
 
 ** Bookmarks
 
-Manage Skim's bookmark list — both top-level (“global”) bookmarks and bookmarks nested inside folder bookmarks — without leaving Emacs:
-
-- ~M-x org-skim-bookmark-add~ — add a bookmark at the current page of the front Skim document.  The name defaults silently to ~org-skim-bookmark-name-format~; with a prefix argument (or when ~org-skim-bookmark-prompt-name~ is non-nil) you are prompted with a name prefilled from ~org-skim-bookmark-prompt-format~.  The container is chosen per ~org-skim-bookmark-container~: ~auto~ prompts every time over =[Global]=, every existing folder bookmark, and =[New folder...]=; ~nil~ adds at the top level silently; a string names a folder (created on confirmation if it doesn't exist).
+- ~M-x org-skim-bookmark-add~ — add a bookmark at the current page.  The name defaults to ~org-skim-bookmark-name-format~; a prefix argument (or ~org-skim-bookmark-prompt-name~ non-nil) prompts for a name prefilled from ~org-skim-bookmark-prompt-format~.  The container is chosen per ~org-skim-bookmark-container~.
 - ~M-x org-skim-bookmark-remove~ — remove a bookmark chosen via completion.
-- ~M-x org-skim-goto-bookmark~ — open a bookmark's PDF in Skim (if not already open), bring its window to the front, and jump to the bookmarked page.
-- ~(org-skim-bookmark-list)~ — non-interactive; returns every file bookmark as ~((folder name path page occurrence) ...)~, with globals first, then by folder path, then by file basename, then by bookmark name.
+- ~M-x org-skim-goto-bookmark~ — open a bookmark's PDF in Skim and jump to its page.
+- ~(org-skim-bookmark-list)~ — non-interactive; returns every file bookmark as ~((folder name path page occurrence) ...)~, globals first, then sorted by folder, file basename, and name.
 
-** Notes
+** Notes (requires ~org-skim-note~)
 
-Link Skim annotations to Org headings and move between the two.  A captured note shares an Org ID, embedded in the Skim note as a hidden ~:SKIM:ORG_ID:<id>:~ marker line and stored as the heading's ~ID~ property; the heading also records the page in ~SKIM_PAGE~ and the document's BibTeX key in a file-level ~REFERENCES~ property (~@citekey~).  The BibTeX key itself is read from a key-icon note on page 1 of the PDF (~:SKIM:BIBTEX_KEY:<key>:~).
+Interactive commands:
 
-This workflow requires ~org-id~, ~org-capture~, and [[https://github.com/emacs-citar/citar][citar]] (for resolving citekeys to files and bibliography fields).  Load it with ~(require 'org-skim-note)~; it is not pulled in by ~(require 'org-skim)~ so the core commands stay free of these dependencies.
+- ~M-x org-skim-note-dwim~ — the main entry point.  View the linked Org entry if it exists; otherwise start a capture.  A prefix argument forces the current frame.
+- ~M-x org-skim-capture-note~ — capture an Org heading for the selected Skim note, embedding a shared Org ID.
+- ~M-x org-skim-view-org-note~ — display the linked Org entry narrowed to its subtree.  Honours ~org-skim-view-note-in-new-frame~.
+- ~M-x org-skim-open-org-note~ — jump to the linked Org heading via ~org-skim-open-org-note-function~.
+- ~M-x org-skim-read-org-note~ — return the linked heading's body as a string without displaying it.
+- ~M-x org-skim-open-note-in-skim~ — from Org, open the PDF in Skim and select the note linked to the heading at point.
+- ~M-x org-skim-open-note-in-skim-by-id~ — same, resolved by an Org ID (from an ~id:~ link, ~ID~ property, or the minibuffer).
+- ~M-x org-skim-set-bibtex-key~ — set or update the page-1 key-icon note that records the document's BibTeX key.
 
-From a selected note in Skim:
+Non-interactive helpers:
 
-- ~M-x org-skim-capture-note~ — start an ~org-capture~ for the selected Skim note.  Generates (or reuses) a shared Org ID, prepends the marker line to the note, and captures into the notes file for the document's citekey, following ~org-skim-capture-template~.  A new notes file gets a frontmatter built from ~org-skim-note-title-template~, ~org-skim-note-filetags~, and ~org-skim-note-references-property~.  Set ~org-skim-capture-in-new-frame~ to run the capture in a dedicated frame that is deleted when you finalize or abort.
-- ~M-x org-skim-open-org-note~ — jump to the Org heading linked to the selected Skim note (via ~org-skim-open-org-note-function~, default ~org-id-find~).
-- ~M-x org-skim-view-org-note~ — display the linked Org heading narrowed to its subtree.  Honours ~org-skim-view-note-in-new-frame~ (open in a dedicated frame, reusing ~org-skim-capture-frame-parameters~).  Widen with ~C-x n w~; close a view frame with ~C-x 5 0~.
-- ~M-x org-skim-read-org-note~ — return the linked heading's body (heading and drawers stripped) as a string, without displaying a buffer.
-- ~M-x org-skim-note-dwim~ — if the selected note already links to an existing Org entry, view it narrowed to its subtree (as ~org-skim-view-org-note~); otherwise capture one (as ~org-skim-capture-note~).  Intended as the single key binding for the workflow.  A prefix argument (the optional ~SAME-FRAME~ argument, also accepted by ~org-skim-capture-note~ and ~org-skim-view-org-note~) forces the current frame instead of the configured new-frame behaviour — useful from ~emacsclient~, e.g. ~(org-skim-note-dwim t)~.
-- ~M-x org-skim-set-bibtex-key~ — set (or update) the page-1 key-icon note that records the document's BibTeX key.
-
-From an Org heading in Emacs:
-
-- ~M-x org-skim-open-note-in-skim~ — the inverse direction.  When point is on a heading carrying ~SKIM_PAGE~ and ~ID~ and inheriting a ~REFERENCES~ citekey, resolve the citekey to a file via citar (first one whose extension is in ~org-skim-open-note-extensions~, default ~pdf~), open it in Skim, jump to ~SKIM_PAGE~, and select the note bearing the heading's Org ID.  Focus stays on Emacs.  If the heading is not a Skim note, it just prints a message.
-
-Non-interactive helpers: ~(org-skim-get-active-note)~ returns a plist (~:type :page :text :org-id :bounds~) for the selected note; ~(org-skim-bibtex-key)~ returns the page-1 BibTeX key; ~(org-skim-get-org-id)~ returns the selected note's embedded Org ID.
+- ~(org-skim-get-active-note)~ — returns a plist ~(:type :page :text :org-id :bounds)~ for the selected note, or nil.
+- ~(org-skim-bibtex-key)~ — returns the BibTeX key embedded on page 1, or nil.
+- ~(org-skim-get-org-id)~ — returns the selected note's embedded Org ID, or signals a ~user-error~.
+- ~(org-skim-capture-value KEY)~ — for use in ~%(...)~ escapes in ~org-skim-capture-template~.
 
 ** Reading bar
 
-Control Skim's reading bar (the horizontal highlight band that tracks lines of text) from Emacs:
-
-- ~M-x org-skim-show-reading-bar~ — show the reading bar on the first line of the current page.  No-op if it is already visible.
+- ~M-x org-skim-show-reading-bar~ — show the reading bar on the first line of the current page.  No-op if already visible.
 - ~M-x org-skim-hide-reading-bar~ — hide the reading bar.
-- ~M-x org-skim-toggle-reading-bar~ — flip between the two; when turning on, the bar lands on the first line of the current page.
-- ~M-x org-skim-reading-bar-next-line~ — advance the bar by one line.  At the bottom of a page it rolls to the next page; on the last page it stops on the final line.  If the bar is hidden, this shows it on the current page first.
-- ~M-x org-skim-reading-bar-previous-line~ — move the bar up by one line, with symmetric page rollover at the top of the page.
+- ~M-x org-skim-toggle-reading-bar~ — flip between shown and hidden; when turning on, the bar lands on the first line of the current page.
+- ~M-x org-skim-reading-bar-next-line~ — advance one line; rolls to the next page at the bottom, stops on the final line of the last page.
+- ~M-x org-skim-reading-bar-previous-line~ — go back one line; rolls to the previous page at the top.
 
-* Debugging
+** Document
 
-By default, AppleScript failures surface as the unhelpful message ~AppleScript error 1~ because Emacs' built-in ~do-applescript~ bridge collapses AppleScript's error strings before they reach Lisp.
-
-To see the real Skim error text, enable debug mode:
-
-- ~M-x org-skim-toggle-debug~ — flip the ~org-skim-debug~ flag.
-
-While debug mode is on:
-
-- the package forces the ~osascript~ subprocess backend (regardless of ~org-skim-applescript-backend~), because only that path lets AppleScript's error message reach Emacs;
-- any AppleScript failure is logged to the =*Messages*= buffer instead of being signalled, so the offending command quietly returns ~nil~ rather than tripping the debugger.
-
-Debug mode is off by default and intended only for development.
+- ~M-x org-skim-save-document~ — save the front Skim document.
 
 * Customization
 
