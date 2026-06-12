@@ -159,7 +159,7 @@ index as integer)."
   (let* ((raw (org-skim--run-applescript
                 "tell application \"Skim\"
          set d to front document
-        set thePath to POSIX path of (file of d)
+        set thePath to path of d
         set theName to name of d
         set thePage to index of current page of d
         return theName & linefeed & thePath & linefeed & (thePage as string)

@@ -178,14 +178,28 @@ current page."
 
 ;;; Page links
 
+(defconst org-skim--open-applescript
+  "on run argv
+	set thePath to item 1 of argv
+	tell application \"Skim\" to open POSIX file thePath
+end run"
+  "AppleScript opening the file named by its first argument in Skim.
+The opened document becomes the front document, so callers may then
+drive it through `org-skim--goto-page-applescript'.  Intentionally
+omits the \"No document open\" guard: opening a document is how the
+front document comes to exist.")
+
 (defun org-skim--page-link-string ()
-  "Return an Org link for the current page of the front Skim document.
-The link target body is intentionally left blank; only the description
-is rendered, using `org-skim-page-link-format'."
+  "Return a clickable Org link for the current page of the front Skim document.
+The target is `skim:PATH::PAGE' (raw absolute path, 1-based page); the
+description is rendered with `org-skim-page-link-format'.  Following the
+link opens PATH in Skim and goes to PAGE (see `org-skim-open-page-link')."
   (org-skim--ensure-document)
   (let* ((info (org-skim--front-document-info))
+         (path (cdr (assq 'path info)))
+         (page (cdr (assq 'page info)))
          (desc (org-skim--expand-template org-skim-page-link-format info)))
-    (format "[[skim:][%s]]" desc)))
+    (format "[[skim:%s::%d][%s]]" path page desc)))
 
 ;;;###autoload
 (defun org-skim-insert-page-link ()
@@ -200,6 +214,23 @@ The link is placed on the kill ring."
   (interactive)
   (kill-new (org-skim--page-link-string))
   (message "org-skim: page link copied to kill ring"))
+
+(defun org-skim-open-page-link (link)
+  "Follow a `skim:PATH::PAGE' LINK: open PATH in Skim and go to PAGE.
+LINK is the link body Org passes after stripping the `skim:' type.
+A trailing `::PAGE' is matched anchored to the end of LINK so a `::'
+appearing earlier in PATH is not mis-split; a link with no trailing
+`::PAGE' opens PATH without moving."
+  (let* ((sep (string-match "::\\([0-9]+\\)\\'" link))
+         (path (if sep (substring link 0 sep) link))
+         (page (and sep (string-to-number (match-string 1 link)))))
+    (org-skim--run-applescript org-skim--open-applescript path)
+    (when page
+      (org-skim--run-applescript org-skim--goto-page-applescript
+                                 (number-to-string page)))))
+
+(require 'ol)
+(org-link-set-parameters "skim" :follow #'org-skim-open-page-link)
 
 ;;; Reading bar
 
