@@ -51,7 +51,7 @@ See `org-skim-bookmark-name-format' for the supported ${...} variables."
 ;;; AppleScript
 
 (defconst org-skim--toc-applescript "\
-on outlineToText(theOutlines, theLevel, headerChar)
+on outlineToText(theOutlines, theLevel, headerChar, thePath)
 	set theText to \"\"
 	set thePrefix to \"\"
 	repeat theLevel times
@@ -62,10 +62,16 @@ on outlineToText(theOutlines, theLevel, headerChar)
 		repeat with i from 1 to theCount
 			set anOutline to item i of theOutlines
 			set theName to name of anOutline
-			set theText to theText & thePrefix & \" \" & theName & linefeed
+			try
+				set thePage to index of (page of anOutline)
+				set theHeading to \"[[skim:\" & thePath & \"::\" & (thePage as string) & \"][\" & theName & \"]]\"
+			on error
+				set theHeading to theName
+			end try
+			set theText to theText & thePrefix & \" \" & theHeading & linefeed
 			set theChildren to outlines of anOutline
 			if (count of theChildren) > 0 then
-				set theText to theText & my outlineToText(theChildren, theLevel + 1, headerChar)
+				set theText to theText & my outlineToText(theChildren, theLevel + 1, headerChar, thePath)
 			end if
 		end repeat
 	end tell
@@ -77,23 +83,28 @@ on run argv
 	set baseLevel to (item 2 of argv) as integer
 	tell application \"Skim\"
 		set theDoc to front document
+		set thePath to path of theDoc
 		set theOutlines to outlines of theDoc
 	end tell
 	if (count of theOutlines) is 0 then error \"The front Skim document has no table of contents.\"
-	return my outlineToText(theOutlines, baseLevel, headerChar)
+	return my outlineToText(theOutlines, baseLevel, headerChar, thePath)
 end run
 "
   "AppleScript that recursively renders the front Skim document's TOC.
 It takes two arguments, the header character and the starting depth, and
-returns the outline as plain text with each item prefixed by the header
-character repeated according to its depth.")
+returns the outline as Org headings.  Each heading is a clickable
+`skim:PATH::PAGE' link whose description is the outline item's name and
+whose target is the item's page in the front document; an item that
+exposes no page falls back to its plain name.  Items are prefixed by the
+header character repeated according to depth.")
 
 (defun org-skim--toc-string ()
   "Return the front Skim document's table of contents as Org heading text.
 When `org-skim-toc-header-name' is a non-empty string, a root heading
 \(e.g. \"* TOC\") is placed above the outline and every extracted item is
-shifted down one level beneath it.  The Skim link/target for each heading
-is not yet implemented and is therefore left blank."
+shifted down one level beneath it.  Each heading is a clickable
+`skim:PATH::PAGE' link to the outline item's page (see
+`org-skim-open-page-link'); the optional root heading carries no link."
   (org-skim--ensure-document)
   (let* ((has-root (and (stringp org-skim-toc-header-name)
                         (not (string-empty-p org-skim-toc-header-name))))
@@ -364,7 +375,8 @@ depth indicated by repeating `org-skim-toc-header-char'.
 The TOC is inserted into the current buffer regardless of its major mode.
 To copy it to the kill ring instead, use `org-skim-yank-toc'.
 
-The Skim link/target for each heading is not yet implemented."
+Each heading is a clickable `skim:' link to the outline item's page;
+follow it with \\[org-open-at-point] to jump there in Skim."
   (interactive)
   (insert (org-skim--toc-string)))
 
