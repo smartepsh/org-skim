@@ -307,18 +307,24 @@ graphics-less Emacs, where the note is shown in the current frame."
   :type 'boolean
   :group 'org-skim)
 
-(defun org-skim--display-org-note (id)
+(defun org-skim--display-org-note (id &optional same-frame)
   "Display the Org entry with ID, narrowed to its subtree.
-Resolves ID with `org-id-find', shows the entry's file buffer
-\(in a fresh frame when `org-skim-view-note-in-new-frame' is
-non-nil and Emacs is graphical, otherwise the current frame),
-moves point to the heading, and narrows to its subtree.  Returns
-the displayed buffer, or nil when ID does not resolve."
+Resolves ID with `org-id-find', shows the entry's file buffer,
+moves point to the heading, and narrows to its subtree.
+
+When SAME-FRAME is nil (the default), framing honours
+`org-skim-view-note-in-new-frame' (and only pops a new frame on a
+graphical display).  When non-nil, the note is shown in the
+current frame regardless.  A new frame uses
+`org-skim-capture-frame-parameters'.  Returns the displayed
+buffer, or nil when ID does not resolve."
   (require 'org-id)
   (let ((location (org-id-find id)))
     (when location
       (let ((buffer (find-file-noselect (car location))))
-        (if (and org-skim-view-note-in-new-frame (display-graphic-p))
+        (if (and (not same-frame)
+                 org-skim-view-note-in-new-frame
+                 (display-graphic-p))
             (let ((frame (make-frame org-skim-capture-frame-parameters)))
               (select-frame-set-input-focus frame)
               (switch-to-buffer buffer))
@@ -331,17 +337,24 @@ the displayed buffer, or nil when ID does not resolve."
         buffer))))
 
 ;;;###autoload
-(defun org-skim-view-org-note ()
+(defun org-skim-view-org-note (&optional same-frame)
   "Show the Org note linked to the active Skim note, narrowed to it.
 The note's embedded Org ID (\":SKIM:ORG_ID:ID:\") is resolved with
-`org-id-find' and its file buffer is displayed (in a new frame
-when `org-skim-view-note-in-new-frame' is non-nil), narrowed to
-the heading's subtree so only that note is visible.  Widen with
-\\[widen] (`C-x n w').  Signals a `user-error' if no note is
-selected, no Org ID is embedded, or the ID does not resolve."
-  (interactive)
+`org-id-find' and its file buffer is displayed, narrowed to the
+heading's subtree so only that note is visible.  Widen with
+\\[widen] (`C-x n w').
+
+With SAME-FRAME nil (the default), framing honours
+`org-skim-view-note-in-new-frame'; non-nil forces the current
+frame.  Interactively, a prefix argument sets it.  From emacsclient
+pass t to force the current frame, e.g.
+\(org-skim-view-org-note t).
+
+Signals a `user-error' if no note is selected, no Org ID is
+embedded, or the ID does not resolve."
+  (interactive "P")
   (let ((id (org-skim-get-org-id)))
-    (or (org-skim--display-org-note id)
+    (or (org-skim--display-org-note id same-frame)
         (user-error "Org ID %s does not resolve to an Org note" id))))
 
 (defcustom org-skim-note-title-template "Notes on ${title}/${year}"
@@ -501,14 +514,19 @@ Saves the document and returns ID."
   (org-skim-save-document)
   id)
 
-(defun org-skim--make-capture-frame ()
+(defun org-skim--make-capture-frame (&optional same-frame)
   "Create and select a dedicated frame for capture, returning it.
 The frame shows a single throwaway buffer; `org-skim-capture-note'
 then routes the CAPTURE buffer into that sole window via
-`display-buffer-alist'.  Returns nil when
-`org-skim-capture-in-new-frame' is nil or Emacs has no window
-system."
-  (when (and org-skim-capture-in-new-frame (display-graphic-p))
+`display-buffer-alist'.
+
+With SAME-FRAME nil (the default), framing honours
+`org-skim-capture-in-new-frame'; non-nil forces the current frame.
+Returns nil (capture in the current frame) when no new frame
+should be used or Emacs has no window system."
+  (when (and (not same-frame)
+             org-skim-capture-in-new-frame
+             (display-graphic-p))
     (let* ((buffer (get-buffer-create " *org-skim-capture-frame*"))
            (frame (make-frame org-skim-capture-frame-parameters)))
       (select-frame-set-input-focus frame)
@@ -517,7 +535,7 @@ system."
       frame)))
 
 ;;;###autoload
-(defun org-skim-capture-note ()
+(defun org-skim-capture-note (&optional same-frame)
   "Capture an Org heading for the active note in Skim.
 
 Generates a fresh Org ID (reusing one already embedded in the
@@ -526,8 +544,12 @@ the Skim note text, then starts an org-capture into the notes
 file for the document's BibTeX key (see
 `org-skim-note-file-function' and `org-skim-capture-template').
 On finalize, the ID is registered with `org-id-add-location' so
-`org-skim-open-org-note' can resolve it."
-  (interactive)
+`org-skim-open-org-note' can resolve it.
+
+With SAME-FRAME nil (the default), framing honours
+`org-skim-capture-in-new-frame'; non-nil forces the current frame.
+Interactively, a prefix argument sets it."
+  (interactive "P")
   (require 'org-id)
   (require 'org-capture)
   (org-skim--ensure-document)
@@ -539,7 +561,7 @@ On finalize, the ID is registered with `org-id-add-location' so
                  (org-skim--embed-org-id (org-id-new))))
          (text (plist-get note :text))
          (prev-frame (selected-frame))
-         (frame (org-skim--make-capture-frame)))
+         (frame (org-skim--make-capture-frame same-frame)))
     (setq org-skim--pending-capture
           (list :id id
                 :citekey citekey
@@ -567,23 +589,30 @@ On finalize, the ID is registered with `org-id-add-location' so
        (signal (car err) (cdr err))))))
 
 ;;;###autoload
-(defun org-skim-note-dwim ()
+(defun org-skim-note-dwim (&optional same-frame)
   "Capture or view the Org note for the active note in Skim.
 
 If the active note has no embedded \":SKIM:ORG_ID:...:\" marker, or
 the embedded ID does not resolve to an existing Org entry, start
 `org-skim-capture-note' (which reuses an already embedded ID).
 Otherwise display the linked entry narrowed to its subtree, as
-with `org-skim-view-org-note' (honouring
-`org-skim-view-note-in-new-frame').  Intended as the single key
-binding for the Skim note workflow."
-  (interactive)
+with `org-skim-view-org-note'.
+
+With SAME-FRAME nil (the default), framing honours whichever
+option applies to the branch taken
+\(`org-skim-view-note-in-new-frame' when viewing,
+`org-skim-capture-in-new-frame' when capturing); non-nil forces
+the current frame.  Interactively, a prefix argument sets it.
+From emacsclient pass t to force the current frame, e.g.
+\(org-skim-note-dwim t).  Intended as the single key binding for
+the Skim note workflow."
+  (interactive "P")
   (require 'org-id)
   (let* ((note (or (org-skim-get-active-note)
                    (user-error "No note selected in Skim")))
          (id (plist-get note :org-id)))
-    (or (and id (org-skim--display-org-note id))
-        (org-skim-capture-note))))
+    (or (and id (org-skim--display-org-note id same-frame))
+        (org-skim-capture-note same-frame))))
 
 (defcustom org-skim-open-note-extensions '("pdf")
   "File extensions `org-skim-open-note-in-skim' will open in Skim.
