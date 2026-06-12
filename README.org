@@ -72,7 +72,7 @@ This workflow requires ~org-id~, ~org-capture~, and [[https://github.com/emacs-c
 
 From a selected note in Skim:
 
-- ~M-x org-skim-capture-note~ — start an ~org-capture~ for the selected Skim note.  Generates (or reuses) a shared Org ID, prepends the marker line to the note, and captures into the notes file for the document's citekey, following ~org-skim-capture-template~.  A new notes file gets a frontmatter built from ~org-skim-note-title-template~, ~org-skim-note-filetags~, and ~org-skim-note-references-property~.
+- ~M-x org-skim-capture-note~ — start an ~org-capture~ for the selected Skim note.  Generates (or reuses) a shared Org ID, prepends the marker line to the note, and captures into the notes file for the document's citekey, following ~org-skim-capture-template~.  A new notes file gets a frontmatter built from ~org-skim-note-title-template~, ~org-skim-note-filetags~, and ~org-skim-note-references-property~.  Set ~org-skim-capture-in-new-frame~ to run the capture in a dedicated frame that is deleted when you finalize or abort.
 - ~M-x org-skim-open-org-note~ — jump to the Org heading linked to the selected Skim note (via ~org-skim-open-org-note-function~, default ~org-id-find~).
 - ~M-x org-skim-read-org-note~ — return the linked heading's body (heading and drawers stripped) as a string, without displaying a buffer.
 - ~M-x org-skim-note-dwim~ — if the selected note already links to an existing Org entry, read it (as ~org-skim-read-org-note~); otherwise capture one (as ~org-skim-capture-note~).  Intended as the single key binding for the workflow.
@@ -124,6 +124,8 @@ Debug mode is off by default and intended only for development.
 | ~org-skim-open-note-extensions~     | ~("pdf")~                     | File extensions ~org-skim-open-note-in-skim~ will open in Skim (lowercase, no leading dot).                                  |
 | ~org-skim-note-file-function~       | ~org-skim--citar-note-file~   | Function mapping a citekey to its Org notes file (default resolves through citar's file-per-key layout).                     |
 | ~org-skim-capture-template~         | (see docstring)               | ~org-capture~ template used by ~org-skim-capture-note~; splice note fields with ~%(org-skim-capture-value KEY)~.             |
+| ~org-skim-capture-in-new-frame~     | ~nil~                         | When non-nil, run ~org-skim-capture-note~ in a dedicated frame, auto-deleted on finalize/abort (graphical Emacs only).      |
+| ~org-skim-capture-frame-parameters~ | (see docstring)               | ~make-frame~ parameters for the capture frame when ~org-skim-capture-in-new-frame~ is non-nil.                              |
 | ~org-skim-note-title-template~      | ~"Notes on ${title}/${year}"~ | Template for the ~#+title~ of a newly created notes file (citar fields ~title~, ~author~, ~year~, ~citekey~).                |
 | ~org-skim-note-filetags~            | ~"ReadingNote"~               | Tag(s) for the ~#+filetags~ of a new notes file; ~nil~ omits the line.                                                       |
 | ~org-skim-note-references-property~ | ~"REFERENCES"~                | File-level property naming the ~@citekey~ reference in new notes files; ~nil~ omits it.                                      |

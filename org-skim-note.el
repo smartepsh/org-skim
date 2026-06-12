@@ -274,6 +274,25 @@ note text), or `:heading' (the note text collapsed to one line)."
   :type 'string
   :group 'org-skim)
 
+(defcustom org-skim-capture-in-new-frame nil
+  "When non-nil, run `org-skim-capture-note' in a dedicated Emacs frame.
+A fresh frame is created for the org-capture buffer and deleted
+automatically when the capture is finalized or aborted, returning
+focus to the previously selected frame.  Has no effect on
+graphics-less Emacs, where capture proceeds in the current frame."
+  :type 'boolean
+  :group 'org-skim)
+
+(defcustom org-skim-capture-frame-parameters
+  '((name . "org-skim capture")
+    (width . 110)
+    (height . 25))
+  "Frame parameters for the capture frame created when
+`org-skim-capture-in-new-frame' is non-nil.  Passed to
+`make-frame'."
+  :type '(alist :key-type symbol :value-type sexp)
+  :group 'org-skim)
+
 (defcustom org-skim-note-title-template "Notes on ${title}/${year}"
   "Template for the #+title of a newly created notes file.
 ${...} variables are resolved from the citekey's bibliography
@@ -299,9 +318,11 @@ captured headings is spelled out in `org-skim-capture-template'."
 
 (defvar org-skim--pending-capture nil
   "Plist describing the Skim note currently being captured.
-Keys are `:id', `:citekey', `:page', `:text', and `:heading'.
-Set by `org-skim-capture-note' and cleared when the capture
-finalizes or aborts.")
+Keys are `:id', `:citekey', `:page', `:text', `:heading',
+`:frame' (the dedicated capture frame, if any), and `:prev-frame'
+(the frame selected before capture, restored on cleanup).  Set by
+`org-skim-capture-note' and cleared when the capture finalizes or
+aborts.")
 
 (defun org-skim-capture-value (key)
   "Return field KEY of the pending Skim capture as a string.
@@ -385,6 +406,16 @@ file-level frontmatter when the file is new, and moves to its end."
       (insert (org-skim--new-note-frontmatter citekey)))
     (goto-char (point-max))))
 
+(defun org-skim--delete-capture-frame ()
+  "Delete the pending capture's dedicated frame, restoring focus.
+No-op when no live capture frame was created."
+  (let ((frame (plist-get org-skim--pending-capture :frame))
+        (prev-frame (plist-get org-skim--pending-capture :prev-frame)))
+    (when (and frame (frame-live-p frame))
+      (when (frame-live-p prev-frame)
+        (select-frame-set-input-focus prev-frame))
+      (delete-frame frame))))
+
 (defun org-skim--capture-after-finalize ()
   "Register the captured heading's Org ID; clear the pending capture.
 No-op for captures not started by `org-skim-capture-note'."
@@ -394,6 +425,7 @@ No-op for captures not started by `org-skim-capture-note'."
         (when file
           (org-id-add-location (plist-get org-skim--pending-capture :id)
                                file))))
+    (org-skim--delete-capture-frame)
     (setq org-skim--pending-capture nil)))
 
 (add-hook 'org-capture-after-finalize-hook #'org-skim--capture-after-finalize)
@@ -418,6 +450,21 @@ Saves the document and returns ID."
   (org-skim-save-document)
   id)
 
+(defun org-skim--make-capture-frame ()
+  "Create and select a dedicated frame for capture, returning it.
+The frame shows a single throwaway buffer; `org-skim-capture-note'
+then routes the CAPTURE buffer into that sole window via
+`display-buffer-alist'.  Returns nil when
+`org-skim-capture-in-new-frame' is nil or Emacs has no window
+system."
+  (when (and org-skim-capture-in-new-frame (display-graphic-p))
+    (let* ((buffer (get-buffer-create " *org-skim-capture-frame*"))
+           (frame (make-frame org-skim-capture-frame-parameters)))
+      (select-frame-set-input-focus frame)
+      (delete-other-windows)
+      (switch-to-buffer buffer t t)
+      frame)))
+
 ;;;###autoload
 (defun org-skim-capture-note ()
   "Capture an Org heading for the active note in Skim.
@@ -439,19 +486,32 @@ On finalize, the ID is registered with `org-id-add-location' so
                       (user-error "No BibTeX key note on page 1 in Skim")))
          (id (or (plist-get note :org-id)
                  (org-skim--embed-org-id (org-id-new))))
-         (text (plist-get note :text)))
+         (text (plist-get note :text))
+         (prev-frame (selected-frame))
+         (frame (org-skim--make-capture-frame)))
     (setq org-skim--pending-capture
           (list :id id
                 :citekey citekey
                 :page (plist-get note :page)
                 :text text
-                :heading (org-skim--single-line text)))
+                :heading (org-skim--single-line text)
+                :frame frame
+                :prev-frame prev-frame))
     (condition-case err
         (let ((org-capture-templates
                `(("s" "Skim note" entry (function org-skim--capture-target)
-                  ,org-skim-capture-template :empty-lines-before 1))))
+                  ,org-skim-capture-template :empty-lines-before 1)))
+              ;; In a dedicated frame, show the CAPTURE buffer in the
+              ;; sole window instead of letting org-capture split the
+              ;; frame (it always uses `org-display-buffer-split').
+              (display-buffer-alist
+               (if frame
+                   (cons '("\\`CAPTURE-" (display-buffer-same-window))
+                         display-buffer-alist)
+                 display-buffer-alist)))
           (org-capture nil "s"))
       ((error quit)
+       (org-skim--delete-capture-frame)
        (setq org-skim--pending-capture nil)
        (signal (car err) (cdr err))))))
 
