@@ -390,6 +390,7 @@ buffer; it only yanks the TOC so it can be pasted elsewhere."
   (message "org-skim: table of contents copied to kill ring"))
 
 (require 'org-skim-bookmarks)
+(require 'org-skim-note)
 
 (provide 'org-skim)
 
