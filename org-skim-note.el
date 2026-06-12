@@ -29,6 +29,7 @@
 
 (require 'subr-x)
 (require 'org-skim-helpers)
+(eval-when-compile (require 'org-macs))  ; for `org-with-point-at'
 
 (declare-function org-capture "org-capture" (&optional goto keys))
 (declare-function org-capture-get "org-capture" (prop &optional local))
@@ -38,6 +39,9 @@
 (declare-function org-id-find "org-id" (id &optional markerp))
 (declare-function org-end-of-subtree "org" (&optional invisible-ok to-heading))
 (declare-function org-end-of-meta-data "org" (&optional full))
+(declare-function org-element-context "org-element" (&optional element))
+(declare-function org-element-type "org-element-ast" (node &optional anonymous))
+(declare-function org-element-property "org-element-ast" (property node))
 (declare-function org-fold-show-all "org-fold" (&optional types))
 (declare-function org-narrow-to-subtree "org" (&optional element))
 (declare-function citar-get-value "citar" (field key-or-entry))
@@ -694,6 +698,27 @@ finds the matching open document, goes to the page, then sets as
 the active note the first note on that page whose text contains
 \":SKIM:ORG_ID:<id>:\".  Uses no `activate', so Emacs keeps focus.")
 
+(defun org-skim--open-note-in-skim-at-point ()
+  "Open the Skim note for the Org heading at point; return non-nil on success.
+Reads the heading's `SKIM_PAGE', `ID', and inherited `REFERENCES'
+properties (via `org-skim--skim-note-at-point'), resolves the
+citekey to a file with citar, and opens that file in Skim at the
+page, selecting the note bearing the heading's Org ID.  Returns
+nil when the heading is not a Skim note (any property missing);
+signals a `user-error' when the citekey has no matching file."
+  (let ((note (org-skim--skim-note-at-point)))
+    (when note
+      (let* ((citekey (plist-get note :citekey))
+             (file (or (org-skim--citar-file-for-citekey citekey)
+                       (user-error "No %s file for citekey %s"
+                                   (string-join org-skim-open-note-extensions "/")
+                                   citekey))))
+        (org-skim--run-applescript org-skim--open-note-applescript
+                                   (expand-file-name file)
+                                   (number-to-string (plist-get note :page))
+                                   (plist-get note :id))
+        t))))
+
 ;;;###autoload
 (defun org-skim-open-note-in-skim ()
   "Open the Skim note for the Org heading at point in Skim.
@@ -708,18 +733,42 @@ heading's Org ID is selected.  Focus stays on Emacs.
 When the heading is not a Skim note (any of the three properties
 missing), print a message and do nothing."
   (interactive)
-  (let ((note (org-skim--skim-note-at-point)))
-    (if (null note)
-        (message "Not a Skim note: heading needs SKIM_PAGE, ID, and a REFERENCES citekey")
-      (let* ((citekey (plist-get note :citekey))
-             (file (or (org-skim--citar-file-for-citekey citekey)
-                       (user-error "No %s file for citekey %s"
-                                   (string-join org-skim-open-note-extensions "/")
-                                   citekey))))
-        (org-skim--run-applescript org-skim--open-note-applescript
-                                   (expand-file-name file)
-                                   (number-to-string (plist-get note :page))
-                                   (plist-get note :id))))))
+  (unless (org-skim--open-note-in-skim-at-point)
+    (message "Not a Skim note: heading needs SKIM_PAGE, ID, and a REFERENCES citekey")))
+
+(defun org-skim--id-at-point ()
+  "Return an Org ID from context, or nil.
+Prefers an `id:' Org link at point; otherwise falls back to the
+`ID' property of the Org entry at point."
+  (require 'org)
+  (or (let ((ctx (org-element-context)))
+        (and (eq (org-element-type ctx) 'link)
+             (equal (org-element-property :type ctx) "id")
+             (org-element-property :path ctx)))
+      (and (derived-mode-p 'org-mode)
+           (org-entry-get (point) "ID"))))
+
+;;;###autoload
+(defun org-skim-open-note-in-skim-by-id (id)
+  "Open the Skim note for the Org entry with ID in Skim.
+
+Resolves ID with `org-id-find' and runs the same logic as
+`org-skim-open-note-in-skim' at that heading, without moving point
+or changing windows in Emacs.  Interactively, ID defaults to an
+`id:' link or `ID' property at point, else it is read from the
+minibuffer.  Signals a `user-error' if ID does not resolve or the
+entry is not a Skim note."
+  (interactive (list (or (org-skim--id-at-point)
+                         (read-string "Org ID: "))))
+  (require 'org-id)
+  (let ((marker (org-id-find id 'marker)))
+    (unless marker
+      (user-error "Org ID %s does not resolve to an Org entry" id))
+    (unwind-protect
+        (org-with-point-at marker
+          (or (org-skim--open-note-in-skim-at-point)
+              (user-error "Org entry %s is not a Skim note" id)))
+      (set-marker marker nil))))
 
 (provide 'org-skim-note)
 
