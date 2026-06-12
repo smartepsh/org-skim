@@ -38,6 +38,8 @@
 (declare-function org-id-find "org-id" (id &optional markerp))
 (declare-function org-end-of-subtree "org" (&optional invisible-ok to-heading))
 (declare-function org-end-of-meta-data "org" (&optional full))
+(declare-function org-fold-show-all "org-fold" (&optional types))
+(declare-function org-narrow-to-subtree "org" (&optional element))
 (declare-function citar-get-value "citar" (field key-or-entry))
 (declare-function citar-get-files "citar" (&optional key-or-keys))
 (declare-function org-entry-get "org" (pom property &optional inherit literal-nil))
@@ -289,9 +291,58 @@ graphics-less Emacs, where capture proceeds in the current frame."
     (height . 25))
   "Frame parameters for the capture frame created when
 `org-skim-capture-in-new-frame' is non-nil.  Passed to
-`make-frame'."
+`make-frame'.  Also used for the view frame created when
+`org-skim-view-note-in-new-frame' is non-nil."
   :type '(alist :key-type symbol :value-type sexp)
   :group 'org-skim)
+
+(defcustom org-skim-view-note-in-new-frame nil
+  "When non-nil, view an existing Org note in a dedicated Emacs frame.
+`org-skim-view-org-note' (and the read branch of
+`org-skim-note-dwim') opens the note's file in a fresh frame,
+narrowed to the heading's subtree, using
+`org-skim-capture-frame-parameters'.  Close the frame yourself
+with \\[delete-frame] (`C-x 5 0').  Has no effect on
+graphics-less Emacs, where the note is shown in the current frame."
+  :type 'boolean
+  :group 'org-skim)
+
+(defun org-skim--display-org-note (id)
+  "Display the Org entry with ID, narrowed to its subtree.
+Resolves ID with `org-id-find', shows the entry's file buffer
+\(in a fresh frame when `org-skim-view-note-in-new-frame' is
+non-nil and Emacs is graphical, otherwise the current frame),
+moves point to the heading, and narrows to its subtree.  Returns
+the displayed buffer, or nil when ID does not resolve."
+  (require 'org-id)
+  (let ((location (org-id-find id)))
+    (when location
+      (let ((buffer (find-file-noselect (car location))))
+        (if (and org-skim-view-note-in-new-frame (display-graphic-p))
+            (let ((frame (make-frame org-skim-capture-frame-parameters)))
+              (select-frame-set-input-focus frame)
+              (switch-to-buffer buffer))
+          (pop-to-buffer buffer))
+        (with-current-buffer buffer
+          (widen)
+          (goto-char (cdr location))
+          (org-fold-show-all)
+          (org-narrow-to-subtree))
+        buffer))))
+
+;;;###autoload
+(defun org-skim-view-org-note ()
+  "Show the Org note linked to the active Skim note, narrowed to it.
+The note's embedded Org ID (\":SKIM:ORG_ID:ID:\") is resolved with
+`org-id-find' and its file buffer is displayed (in a new frame
+when `org-skim-view-note-in-new-frame' is non-nil), narrowed to
+the heading's subtree so only that note is visible.  Widen with
+\\[widen] (`C-x n w').  Signals a `user-error' if no note is
+selected, no Org ID is embedded, or the ID does not resolve."
+  (interactive)
+  (let ((id (org-skim-get-org-id)))
+    (or (org-skim--display-org-note id)
+        (user-error "Org ID %s does not resolve to an Org note" id))))
 
 (defcustom org-skim-note-title-template "Notes on ${title}/${year}"
   "Template for the #+title of a newly created notes file.
@@ -517,21 +568,22 @@ On finalize, the ID is registered with `org-id-add-location' so
 
 ;;;###autoload
 (defun org-skim-note-dwim ()
-  "Capture or read the Org note for the active note in Skim.
+  "Capture or view the Org note for the active note in Skim.
 
 If the active note has no embedded \":SKIM:ORG_ID:...:\" marker, or
 the embedded ID does not resolve to an existing Org entry, start
 `org-skim-capture-note' (which reuses an already embedded ID).
-Otherwise return the linked entry's content as a string, as with
-`org-skim-read-org-note'; no buffer is displayed.  Intended as the
-single key binding for the Skim note workflow."
+Otherwise display the linked entry narrowed to its subtree, as
+with `org-skim-view-org-note' (honouring
+`org-skim-view-note-in-new-frame').  Intended as the single key
+binding for the Skim note workflow."
   (interactive)
   (require 'org-id)
   (let* ((note (or (org-skim-get-active-note)
                    (user-error "No note selected in Skim")))
-         (id (plist-get note :org-id))
-         (content (and id (org-skim--org-note-content id))))
-    (or content (org-skim-capture-note))))
+         (id (plist-get note :org-id)))
+    (or (and id (org-skim--display-org-note id))
+        (org-skim-capture-note))))
 
 (defcustom org-skim-open-note-extensions '("pdf")
   "File extensions `org-skim-open-note-in-skim' will open in Skim.
